@@ -218,6 +218,47 @@ app.post('/api/chat', async (req, res) => {
     }
   }
 
+  if (isDistanceIntent(userText)) {
+    try {
+      const directGeo = normalizeClientGeo(req.body?.clientGeo);
+      const origin = await resolveGeo(directGeo);
+      if (!origin) {
+        return res.json({
+          reply: 'I could not determine your location yet. Please allow location access, then ask again.',
+          savedMemory: null,
+          memoriesUsed: [],
+          stats: { mode: 'direct_distance', ok: false, reason: 'missing_origin' }
+        });
+      }
+      const placeQuery = extractPlaceFromDistanceQuestion(userText);
+      if (!placeQuery) {
+        return res.json({
+          reply: 'Tell me the destination place, for example: "How far is New York from my place?"',
+          savedMemory: null,
+          memoriesUsed: [],
+          stats: { mode: 'direct_distance', ok: false, reason: 'missing_destination' }
+        });
+      }
+      const destination = await geocodePlace(placeQuery);
+      const distanceKm = haversineKm(origin.latitude, origin.longitude, destination.latitude, destination.longitude);
+      const reply = formatDistanceReply(origin, destination, distanceKm);
+      return res.json({
+        reply,
+        savedMemory: null,
+        memoriesUsed: [],
+        stats: { mode: 'direct_distance', ok: true, distanceKm }
+      });
+    } catch (err) {
+      log('WARN', 'Direct distance handler failed', { error: err.message });
+      return res.json({
+        reply: 'I could not compute that distance right now. Please try again in a moment.',
+        savedMemory: null,
+        memoriesUsed: [],
+        stats: { mode: 'direct_distance', ok: false, reason: 'distance_failed' }
+      });
+    }
+  }
+
   const now = Date.now();
   if (now < cooldownUntil) {
     const seconds = Math.ceil((cooldownUntil - now) / 1000);
@@ -622,6 +663,11 @@ function isNearbyPlacesIntent(text) {
   return /(restaurant|food|eat|dinner|lunch|breakfast|cafe|coffee|near me|around my area|around me|nearby)/.test(q);
 }
 
+function isDistanceIntent(text) {
+  const q = String(text || '').toLowerCase();
+  return /(how far|distance|how many miles|how many km|how long to drive|drive to|from my place to)/.test(q);
+}
+
 async function resolveGeo(clientGeo) {
   if (clientGeo) return clientGeo;
   try {
@@ -827,6 +873,81 @@ async function fetchOverpass(url, options) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function extractPlaceFromDistanceQuestion(text) {
+  const q = String(text || '').trim();
+  const patterns = [
+    /how far is\s+(.+?)\s+from\s+(?:my place|me|my location|here)\??$/i,
+    /distance\s+to\s+(.+?)\??$/i,
+    /how many (?:miles|km|kilometers?) to\s+(.+?)\??$/i,
+    /from my place to\s+(.+?)\??$/i
+  ];
+  for (const p of patterns) {
+    const m = q.match(p);
+    if (m?.[1]) return m[1].trim();
+  }
+  return null;
+}
+
+async function geocodePlace(query) {
+  // Prefer Open-Meteo geocoding (lighter restrictions), then fall back to Nominatim.
+  try {
+    const params = new URLSearchParams({
+      name: query,
+      count: '1',
+      language: 'en',
+      format: 'json'
+    });
+    const url = `https://geocoding-api.open-meteo.com/v1/search?${params.toString()}`;
+    const data = await fetchJson(url, { timeoutMs: 9000 });
+    const first = Array.isArray(data?.results) ? data.results[0] : null;
+    if (first) {
+      const lat = Number(first.latitude);
+      const lon = Number(first.longitude);
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        const parts = [first.name, first.admin1, first.country].filter(Boolean);
+        return {
+          latitude: lat,
+          longitude: lon,
+          displayName: sanitizeText(parts.join(', ') || query, 180)
+        };
+      }
+    }
+  } catch {
+    // continue to fallback
+  }
+
+  const params = new URLSearchParams({
+    q: query,
+    format: 'jsonv2',
+    limit: '1'
+  });
+  const url = `https://nominatim.openstreetmap.org/search?${params.toString()}`;
+  const data = await fetchJson(url, { timeoutMs: 9000 });
+  const first = Array.isArray(data) ? data[0] : null;
+  if (!first) throw new Error('Destination not found.');
+  const lat = Number(first.lat);
+  const lon = Number(first.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) throw new Error('Destination coordinates invalid.');
+  return {
+    latitude: lat,
+    longitude: lon,
+    displayName: sanitizeText(first.display_name || query, 180)
+  };
+}
+
+function formatDistanceReply(origin, destination, distanceKm) {
+  const miles = distanceKm * 0.621371;
+  const originLabel = [origin.city, origin.region, origin.country].filter(Boolean).join(', ') || 'your location';
+  const place = destination.displayName.split(',').slice(0, 3).join(', ');
+
+  const driveHours = distanceKm / 72; // rough average road speed
+  const driveText = driveHours < 1
+    ? `${Math.round(driveHours * 60)} min`
+    : `${driveHours.toFixed(1)} hr`;
+
+  return `From ${originLabel} to ${place}: about ${distanceKm.toFixed(1)} km (${miles.toFixed(1)} miles) straight-line distance. Rough driving time is around ${driveText}, depending on traffic and route.`;
 }
 
 function formatNearbyPlacesReply(userText, geo, places) {

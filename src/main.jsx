@@ -390,9 +390,13 @@ function isNearbyPlacesQuery(text) {
   return /(restaurant|food|eat|dinner|lunch|breakfast|cafe|coffee|near me|around me|around my area|around my location)/i.test(String(text || ''));
 }
 
+function isDistanceQuery(text) {
+  return /(how far|distance|how many miles|how many km|how long to drive|from my place to)/i.test(String(text || ''));
+}
+
 function needsGeoLookup(text) {
   const q = String(text || '');
-  return isWeatherQuery(q) || isNearbyPlacesQuery(q);
+  return isWeatherQuery(q) || isNearbyPlacesQuery(q) || isDistanceQuery(q);
 }
 
 function getBrowserGeo() {
