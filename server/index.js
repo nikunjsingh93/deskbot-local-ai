@@ -66,6 +66,7 @@ const insertMessageLog = db.prepare('INSERT INTO message_log (provider, model, u
 let llmBusy = false;
 let cooldownUntil = 0;
 let activeRequest = null;
+const CONTINUE_PROMPT = 'Continue exactly where you stopped. Do not repeat prior text. Continue the same sentence naturally.';
 
 const app = express();
 app.use(cors({ origin: true }));
@@ -186,6 +187,18 @@ app.post('/api/chat', async (req, res) => {
       const result = await callOllamaChat(base, model, llmMessages);
       reply = result.reply;
       stats = result.stats;
+
+      // If the output likely hit generation limits, auto-continue once.
+      if (shouldAutoContinue(reply, stats, config.ollamaNumPredict)) {
+        const continueMessages = [
+          ...llmMessages,
+          { role: 'assistant', content: reply },
+          { role: 'user', content: CONTINUE_PROMPT }
+        ];
+        const continued = await callOllamaChat(base, model, continueMessages);
+        reply = `${reply.trimEnd()} ${continued.reply.trimStart()}`.trim();
+        stats = mergeStats(stats, continued.stats);
+      }
 
       if (config.explicitUnloadAfterChat) {
         // Disabled by default. keep_alive=0 on the chat request is usually enough and avoids extra server work.
@@ -479,6 +492,29 @@ function nsToMs(ns) {
 function parseKeepAlive(value) {
   if (value === 0 || value === '0') return 0;
   return value;
+}
+
+function shouldAutoContinue(reply, stats, maxPredict) {
+  const text = String(reply || '').trim();
+  if (!text) return false;
+
+  // If model consumed almost all allowed output tokens, it likely stopped by limit.
+  const evalCount = Number(stats?.evalCount);
+  if (Number.isFinite(evalCount) && evalCount >= Math.max(32, maxPredict - 8)) return true;
+
+  // Also continue when ending looks cut off (no punctuation/closing quote).
+  return !/[.!?'"`)\\]]$/.test(text);
+}
+
+function mergeStats(first, second) {
+  return {
+    ...first,
+    continued: true,
+    continuedLoadDurationMs: second?.loadDurationMs,
+    continuedPromptEvalCount: second?.promptEvalCount,
+    continuedEvalCount: second?.evalCount,
+    continuedTotalDurationMs: second?.totalDurationMs
+  };
 }
 
 function intEnv(name, fallback) {
