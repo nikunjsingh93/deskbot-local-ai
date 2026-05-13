@@ -18,7 +18,7 @@ const defaultSettings = {
   standaloneModel: 'onnx-community/SmolLM2-360M-Instruct-ONNX',
   ttsEnabled: true,
   autoSpeak: true,
-  useNeuralLocalTts: false
+  ttsEngine: 'browser'
 };
 
 function App() {
@@ -62,10 +62,10 @@ function App() {
   }, [settings.standaloneModel]);
 
   useEffect(() => {
-    if (typeof settings.useNeuralLocalTts !== 'boolean') {
-      updateSettings({ useNeuralLocalTts: false });
+    if (!['browser', 'kokoro'].includes(settings.ttsEngine)) {
+      updateSettings({ ttsEngine: 'browser' });
     }
-  }, [settings.useNeuralLocalTts]);
+  }, [settings.ttsEngine]);
 
   function updateSettings(patch) {
     setSettings((prev) => ({ ...prev, ...patch }));
@@ -220,7 +220,7 @@ function App() {
 
     if (!cleanText) return;
 
-    if (settings.useNeuralLocalTts) {
+    if (settings.ttsEngine === 'kokoro') {
       try {
         window.speechSynthesis.cancel();
         await speakWithKokoro(cleanText, { onStatus: setModelStatus });
@@ -441,12 +441,13 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
               <input type="checkbox" checked={settings.autoSpeak} onChange={(e) => updateSettings({ autoSpeak: e.target.checked })} />
               Auto-speak replies
             </label>
-            <label className="checkbox-row">
-              <input type="checkbox" checked={Boolean(settings.useNeuralLocalTts)} onChange={(e) => updateSettings({ useNeuralLocalTts: e.target.checked })} />
-              Neural local TTS (Kokoro)
-            </label>
-            {settings.useNeuralLocalTts && (
-              <p className="muted small">First use downloads Kokoro model files locally, then caches them in the browser. If unavailable, DeskBot falls back to default browser voice automatically.</p>
+            <label>TTS Engine</label>
+            <select value={settings.ttsEngine || 'browser'} onChange={(e) => updateSettings({ ttsEngine: e.target.value })}>
+              <option value="browser">Browser default voice</option>
+              <option value="kokoro">Kokoro local neural TTS</option>
+            </select>
+            {settings.ttsEngine === 'kokoro' && (
+              <p className="muted small">First use downloads model files locally and caches them in browser storage. If unavailable, DeskBot automatically falls back to browser voice.</p>
             )}
           </div>
         )}
