@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { Bot, Mic, MicOff, Send, Settings, Trash2, RefreshCw, Volume2, VolumeX, Database, AlertTriangle, X } from 'lucide-react';
 import './styles.css';
 import { runStandaloneChat } from './standaloneLLM.js';
+import { speakWithKokoro } from './localTTS.js';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 const STORAGE_KEY = 'deskbot_minimal_safe_v1';
@@ -16,7 +17,8 @@ const defaultSettings = {
   openaiModel: '',
   standaloneModel: 'onnx-community/SmolLM2-360M-Instruct-ONNX',
   ttsEnabled: true,
-  autoSpeak: true
+  autoSpeak: true,
+  useNeuralLocalTts: false
 };
 
 function App() {
@@ -58,6 +60,12 @@ function App() {
       updateSettings({ standaloneModel: DEFAULT_STANDALONE_MODEL });
     }
   }, [settings.standaloneModel]);
+
+  useEffect(() => {
+    if (typeof settings.useNeuralLocalTts !== 'boolean') {
+      updateSettings({ useNeuralLocalTts: false });
+    }
+  }, [settings.useNeuralLocalTts]);
 
   function updateSettings(patch) {
     setSettings((prev) => ({ ...prev, ...patch }));
@@ -109,7 +117,9 @@ function App() {
       const assistantMessage = { role: 'assistant', content: data.reply, savedMemory: data.savedMemory, stats: data.stats };
       setMessages([...nextMessages, assistantMessage]);
       setMood(data.savedMemory ? 'happy' : 'idle');
-      if (settings.ttsEnabled && settings.autoSpeak) speak(data.reply);
+      if (settings.ttsEnabled && settings.autoSpeak) {
+        void speak(data.reply);
+      }
       if (data.savedMemory) refreshMemories();
       setModelStatus('');
     } catch (err) {
@@ -196,14 +206,48 @@ function App() {
     setLogs(await response.text());
   }
 
-  function speak(text) {
+  async function speak(text) {
     if (!('speechSynthesis' in window)) return;
+
+    const cleanText = text
+      .replace(/```[\s\S]*?```/g, ' code omitted ')
+      .replace(/`[^`]*`/g, ' ')
+      .replace(/\[[^\]]+\]\((https?:\/\/[^\s)]+)\)/g, ' ')
+      .replace(/https?:\/\/\S+/g, ' ')
+      .replace(/^[\-\*\d\.\)\s]+/gm, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!cleanText) return;
+
+    if (settings.useNeuralLocalTts) {
+      try {
+        window.speechSynthesis.cancel();
+        await speakWithKokoro(cleanText, { onStatus: setModelStatus });
+        setModelStatus('');
+        return;
+      } catch {
+        setModelStatus('Neural TTS unavailable, using default local voice.');
+      }
+    }
+
     window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text.replace(/```[\s\S]*?```/g, 'code block omitted'));
-    utterance.rate = 1.02;
-    utterance.pitch = 1.1;
-    utterance.volume = 1;
-    window.speechSynthesis.speak(utterance);
+    const baseRate = 1.0;
+    const basePitch = 1.0;
+    const chunks = cleanText.match(/[^.!?]+[.!?]?/g) || [cleanText];
+
+    for (const rawChunk of chunks) {
+      const chunk = rawChunk.trim();
+      if (!chunk) continue;
+      const utterance = new SpeechSynthesisUtterance(chunk);
+      utterance.rate = baseRate;
+      utterance.pitch = basePitch;
+      utterance.volume = 1;
+      utterance.onend = () => {
+        setModelStatus('');
+      };
+      window.speechSynthesis.speak(utterance);
+    }
   }
 
   function toggleListening() {
@@ -397,6 +441,13 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
               <input type="checkbox" checked={settings.autoSpeak} onChange={(e) => updateSettings({ autoSpeak: e.target.checked })} />
               Auto-speak replies
             </label>
+            <label className="checkbox-row">
+              <input type="checkbox" checked={Boolean(settings.useNeuralLocalTts)} onChange={(e) => updateSettings({ useNeuralLocalTts: e.target.checked })} />
+              Neural local TTS (Kokoro)
+            </label>
+            {settings.useNeuralLocalTts && (
+              <p className="muted small">First use downloads Kokoro model files locally, then caches them in the browser. If unavailable, DeskBot falls back to default browser voice automatically.</p>
+            )}
           </div>
         )}
 
@@ -446,6 +497,7 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
               <a href="https://sqlite.org/copyright.html" target="_blank" rel="noreferrer">SQLite (Public Domain)</a>
               <a href="https://github.com/lucide-icons/lucide/blob/main/LICENSE" target="_blank" rel="noreferrer">lucide-react (ISC)</a>
               <a href="https://github.com/huggingface/transformers.js/blob/main/LICENSE" target="_blank" rel="noreferrer">@huggingface/transformers (Apache-2.0)</a>
+              <a href="https://github.com/hexgrad/kokoro/blob/main/LICENSE" target="_blank" rel="noreferrer">kokoro-js / Kokoro model (Apache-2.0)</a>
             </div>
           </div>
         )}

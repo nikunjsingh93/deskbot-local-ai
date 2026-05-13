@@ -11,17 +11,17 @@
     "reset-local-db": "node server/reset-db.js"
   },
   "dependencies": {
+    "@huggingface/transformers": "^3.5.2",
     "@vitejs/plugin-react": "latest",
     "better-sqlite3": "latest",
     "concurrently": "latest",
     "cors": "latest",
     "dotenv": "latest",
     "express": "latest",
-    "vite": "latest",
+    "kokoro-js": "^1.2.1",
+    "lucide-react": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "lucide-react": "latest",
-    "@huggingface/transformers": "^3.5.2"
-  },
-  "devDependencies": {}
+    "vite": "latest"
+  }
 }
