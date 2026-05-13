@@ -8,6 +8,7 @@ import { speakWithKokoro, stopKokoroPlayback } from './localTTS.js';
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 const STORAGE_KEY = 'deskbot_minimal_safe_v1';
 const DEFAULT_STANDALONE_MODEL = 'onnx-community/SmolLM2-360M-Instruct-ONNX';
+const WAKE_SILENCE_SEND_MS = 1200;
 
 const defaultSettings = {
   provider: 'ollama',
@@ -19,7 +20,9 @@ const defaultSettings = {
   ttsEnabled: true,
   autoSpeak: true,
   ttsEngine: 'browser',
-  kokoroVoice: 'af_bella'
+  kokoroVoice: 'af_bella',
+  wakeEnabled: false,
+  wakeWord: 'bot'
 };
 
 function App() {
@@ -34,11 +37,17 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [models, setModels] = useState([]);
   const [modelStatus, setModelStatus] = useState('');
+  const [wakeArmed, setWakeArmed] = useState(false);
   const [memories, setMemories] = useState([]);
   const [logs, setLogs] = useState('');
   const [listening, setListening] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
   const chatEndRef = useRef(null);
   const recognitionRef = useRef(null);
+  const manualStopRef = useRef(false);
+  const wakeCaptureTimerRef = useRef(null);
+  const wakeCapturedRef = useRef('');
+  const wakeArmedRef = useRef(false);
 
   const activeModel = settings.provider === 'ollama'
     ? settings.ollamaModel
@@ -74,9 +83,22 @@ function App() {
     }
   }, [settings.kokoroVoice]);
 
+  useEffect(() => {
+    if (!settings.wakeWord) {
+      updateSettings({ wakeWord: 'bot' });
+    }
+  }, [settings.wakeWord]);
+
   function updateSettings(patch) {
     setSettings((prev) => ({ ...prev, ...patch }));
   }
+
+  function setWakeArmedState(next) {
+    wakeArmedRef.current = next;
+    setWakeArmed(next);
+  }
+
+  const assistantName = String(settings.wakeWord || 'bot').trim() || 'bot';
 
   async function sendMessage(textOverride) {
     const text = (textOverride ?? input).trim();
@@ -127,7 +149,7 @@ function App() {
       setMessages([...nextMessages, assistantMessage]);
       setMood(data.savedMemory ? 'happy' : 'idle');
       if (settings.ttsEnabled && settings.autoSpeak) {
-        void speak(data.reply);
+        await speak(data.reply);
       }
       if (data.savedMemory) refreshMemories();
       setModelStatus('');
@@ -139,6 +161,13 @@ function App() {
     } finally {
       setBusy(false);
       window.setTimeout(() => setMood('idle'), 1400);
+      if (settings.wakeEnabled) {
+        window.setTimeout(() => {
+          if (!listening && !speaking) {
+            toggleListening();
+          }
+        }, 60);
+      }
     }
   }
 
@@ -217,84 +246,180 @@ function App() {
 
   async function speak(text) {
     if (!('speechSynthesis' in window)) return;
-
-    const cleanText = text
-      .replace(/```[\s\S]*?```/g, ' code omitted ')
-      .replace(/`[^`]*`/g, ' ')
-      .replace(/\[[^\]]+\]\((https?:\/\/[^\s)]+)\)/g, ' ')
-      .replace(/https?:\/\/\S+/g, ' ')
-      .replace(/^[\-\*\d\.\)\s]+/gm, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    if (!cleanText) return;
-
-    stopKokoroPlayback();
-    if (settings.ttsEngine === 'kokoro') {
-      try {
-        window.speechSynthesis.cancel();
-        await speakWithKokoro(cleanText, {
-          onStatus: setModelStatus,
-          voice: settings.kokoroVoice || 'af_bella'
-        });
-        setModelStatus('');
-        return;
-      } catch {
-        setModelStatus('Neural TTS unavailable, using default local voice.');
+    if (listening) {
+      manualStopRef.current = true;
+      if (wakeCaptureTimerRef.current) {
+        clearTimeout(wakeCaptureTimerRef.current);
+        wakeCaptureTimerRef.current = null;
       }
+      recognitionRef.current?.stop();
+      setListening(false);
+      setWakeArmedState(false);
     }
+    setSpeaking(true);
 
-    window.speechSynthesis.cancel();
-    const baseRate = 1.0;
-    const basePitch = 1.0;
-    const chunks = cleanText.match(/[^.!?]+[.!?]?/g) || [cleanText];
+    try {
+      const cleanText = text
+        .replace(/```[\s\S]*?```/g, ' code omitted ')
+        .replace(/`[^`]*`/g, ' ')
+        .replace(/\[[^\]]+\]\((https?:\/\/[^\s)]+)\)/g, ' ')
+        .replace(/https?:\/\/\S+/g, ' ')
+        .replace(/^[\-\*\d\.\)\s]+/gm, '')
+        .replace(/\s+/g, ' ')
+        .trim();
 
-    for (const rawChunk of chunks) {
-      const chunk = rawChunk.trim();
-      if (!chunk) continue;
-      const utterance = new SpeechSynthesisUtterance(chunk);
-      utterance.rate = baseRate;
-      utterance.pitch = basePitch;
-      utterance.volume = 1;
-      utterance.onend = () => {
-        setModelStatus('');
-      };
-      window.speechSynthesis.speak(utterance);
+      if (!cleanText) return;
+
+      stopKokoroPlayback();
+      if (settings.ttsEngine === 'kokoro') {
+        try {
+          window.speechSynthesis.cancel();
+          await speakWithKokoro(cleanText, {
+            onStatus: setModelStatus,
+            voice: settings.kokoroVoice || 'af_bella'
+          });
+          setModelStatus('');
+          return;
+        } catch {
+          setModelStatus('Neural TTS unavailable, using default local voice.');
+        }
+      }
+
+      window.speechSynthesis.cancel();
+      const baseRate = 1.0;
+      const basePitch = 1.0;
+      const chunks = cleanText.match(/[^.!?]+[.!?]?/g) || [cleanText];
+
+      for (const rawChunk of chunks) {
+        const chunk = rawChunk.trim();
+        if (!chunk) continue;
+        await new Promise((resolve) => {
+          const utterance = new SpeechSynthesisUtterance(chunk);
+          utterance.rate = baseRate;
+          utterance.pitch = basePitch;
+          utterance.volume = 1;
+          utterance.onend = () => {
+            setModelStatus('');
+            resolve();
+          };
+          utterance.onerror = () => resolve();
+          window.speechSynthesis.speak(utterance);
+        });
+      }
+    } finally {
+      setSpeaking(false);
     }
   }
 
   function toggleListening() {
+    if (speaking) return;
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
       setError('Speech recognition is not available in this browser. Chrome works best.');
       return;
     }
     if (listening) {
+      manualStopRef.current = true;
+      if (wakeCaptureTimerRef.current) {
+        clearTimeout(wakeCaptureTimerRef.current);
+        wakeCaptureTimerRef.current = null;
+      }
       recognitionRef.current?.stop();
       setListening(false);
       setMood('idle');
+      setWakeArmedState(false);
+      wakeCapturedRef.current = '';
+      setModelStatus('');
       return;
     }
+    manualStopRef.current = false;
     const recognition = new SpeechRecognition();
     recognition.lang = 'en-US';
     recognition.interimResults = false;
-    recognition.continuous = false;
+    recognition.continuous = true;
+    recognition.onspeechstart = () => {
+      if (wakeCaptureTimerRef.current) {
+        clearTimeout(wakeCaptureTimerRef.current);
+        wakeCaptureTimerRef.current = null;
+      }
+    };
+    recognition.onspeechend = () => {
+      if (!settings.wakeEnabled || !wakeArmedRef.current) return;
+      if (wakeCaptureTimerRef.current) clearTimeout(wakeCaptureTimerRef.current);
+      wakeCaptureTimerRef.current = setTimeout(() => {
+        manualStopRef.current = true;
+        recognitionRef.current?.stop();
+      }, 2500);
+    };
     recognition.onstart = () => {
       setListening(true);
       setMood('listening');
+      wakeCapturedRef.current = '';
+      if (settings.wakeEnabled) {
+        setModelStatus(`Wake mode on. Say "${assistantName}" then your question.`);
+        setWakeArmedState(false);
+      }
     };
     recognition.onresult = (event) => {
-      const transcript = event.results?.[0]?.[0]?.transcript || '';
+      const transcript = event.results?.[event.resultIndex]?.[0]?.transcript?.trim() || '';
+      if (!transcript) return;
+
+      if (settings.wakeEnabled) {
+        const wake = String(settings.wakeWord || 'bot').trim();
+        const wakeMatch = findWakeWordMatch(transcript, wake);
+        const hasWake = Boolean(wakeMatch);
+        if (!hasWake && !wakeArmedRef.current) return;
+        const withoutWake = hasWake ? wakeMatch.restText : transcript;
+        const userQuery = withoutWake.trim().replace(/^[,.:;\s-]+/, '');
+        if (!userQuery) {
+          setWakeArmedState(true);
+          wakeCapturedRef.current = '';
+          setModelStatus(`Heard "${wake}". Now ask your question.`);
+          return;
+        }
+        setWakeArmedState(true);
+        wakeCapturedRef.current = wakeCapturedRef.current
+          ? `${wakeCapturedRef.current} ${userQuery}`.trim()
+          : userQuery;
+        setInput(wakeCapturedRef.current);
+        setModelStatus('Listening... capturing your question.');
+        if (wakeCaptureTimerRef.current) clearTimeout(wakeCaptureTimerRef.current);
+        wakeCaptureTimerRef.current = setTimeout(() => {
+          manualStopRef.current = true;
+          recognitionRef.current?.stop();
+        }, WAKE_SILENCE_SEND_MS);
+        return;
+      }
+
       setInput(transcript);
-      if (transcript.trim()) sendMessage(transcript.trim());
+      if (transcript) {
+        manualStopRef.current = true;
+        recognitionRef.current?.stop();
+        sendMessage(transcript);
+      }
     };
     recognition.onerror = (event) => {
       setError(`Voice input error: ${event.error}`);
       setMood('worried');
     };
     recognition.onend = () => {
+      if (wakeCaptureTimerRef.current) {
+        clearTimeout(wakeCaptureTimerRef.current);
+        wakeCaptureTimerRef.current = null;
+      }
+      const capturedQuery = wakeCapturedRef.current.trim();
       setListening(false);
       setMood('idle');
+      setWakeArmedState(false);
+      wakeCapturedRef.current = '';
+      if (settings.wakeEnabled && capturedQuery) {
+        setInput(capturedQuery);
+        if (!busy) {
+          sendMessage(capturedQuery);
+          return;
+        }
+      }
+      if (!busy) setModelStatus('');
     };
     recognitionRef.current = recognition;
     recognition.start();
@@ -305,7 +430,7 @@ function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div className="brand"><Bot size={22} /> DeskBot</div>
+        <div className="brand"><Bot size={22} /> {assistantName}</div>
         <button className="icon-button" onClick={() => setSettingsOpen(true)} title="Settings"><Settings /></button>
       </header>
 
@@ -332,6 +457,15 @@ function App() {
               </div>
             ))}
             {busy && <div className="message assistant"><div className="bubble typing">Thinking<span>.</span><span>.</span><span>.</span></div></div>}
+            {listening && (!settings.wakeEnabled || wakeArmed) && (
+              <div className="message assistant listen-inline">
+                <div className="bubble listening-chip">
+                  {settings.wakeEnabled
+                    ? (wakeArmed ? 'Listening... ask now.' : `Listening for "${assistantName}"...`)
+                    : 'Listening...'}
+                </div>
+              </div>
+            )}
             <div ref={chatEndRef} />
           </div>
 
@@ -358,7 +492,7 @@ function App() {
             >
               {settings.ttsEnabled ? <Volume2 /> : <VolumeX />}
             </button>
-            <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask DeskBot, or say: Remember that I prefer simple Docker setups..." disabled={busy} />
+            <input value={input} onChange={(e) => setInput(e.target.value)} placeholder={`Ask ${assistantName}, or say: Remember that I prefer simple Docker setups...`} disabled={busy} />
             <button type="submit" className="send-button" disabled={busy || !input.trim()}><Send size={18} /> Send</button>
           </form>
         </section>
@@ -415,6 +549,53 @@ function isDistanceQuery(text) {
 function needsGeoLookup(text) {
   const q = String(text || '');
   return isWeatherQuery(q) || isNearbyPlacesQuery(q) || isDistanceQuery(q);
+}
+
+function findWakeWordMatch(transcript, wakeWord) {
+  const cleanedWake = normalizeToken(wakeWord);
+  if (!cleanedWake) return null;
+  const tokens = String(transcript || '').split(/\s+/).filter(Boolean);
+  for (let i = 0; i < tokens.length; i += 1) {
+    const normalized = normalizeToken(tokens[i]);
+    if (!normalized) continue;
+    const isExact = normalized === cleanedWake;
+    const isNear = normalized.length >= 3 && cleanedWake.length >= 3 && editDistanceAtMostOne(normalized, cleanedWake);
+    if (!isExact && !isNear) continue;
+    const restText = tokens.filter((_, idx) => idx !== i).join(' ');
+    return { restText };
+  }
+  return null;
+}
+
+function normalizeToken(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function editDistanceAtMostOne(a, b) {
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  let j = 0;
+  let edits = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      i += 1;
+      j += 1;
+      continue;
+    }
+    edits += 1;
+    if (edits > 1) return false;
+    if (a.length > b.length) {
+      i += 1;
+    } else if (b.length > a.length) {
+      j += 1;
+    } else {
+      i += 1;
+      j += 1;
+    }
+  }
+  if (i < a.length || j < b.length) edits += 1;
+  return edits <= 1;
 }
 
 function getBrowserGeo() {
@@ -529,6 +710,17 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
                 <p className="muted small">First use downloads model files locally and caches them in browser storage. If unavailable, DeskBot automatically falls back to browser voice.</p>
               </>
             )}
+            <label className="checkbox-row">
+              <input type="checkbox" checked={Boolean(settings.wakeEnabled)} onChange={(e) => updateSettings({ wakeEnabled: e.target.checked })} />
+              Enable wake word listening
+            </label>
+            <label>Assistant name / wake word</label>
+            <input
+              value={settings.wakeWord || 'bot'}
+              onChange={(e) => updateSettings({ wakeWord: e.target.value })}
+              placeholder="bot"
+            />
+            <p className="muted small">Wake is off by default. Turn it on, then say the wake word and your question, for example: "bot what is the weather?".</p>
           </div>
         )}
 

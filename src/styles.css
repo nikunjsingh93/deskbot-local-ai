@@ -100,6 +100,8 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
 .typing span:nth-child(3) { animation-delay: 0.3s; }
 @keyframes pop { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
 .error-box { margin: 0 18px 12px; padding: 10px 12px; border: 1px solid rgba(255,119,138,0.35); background: rgba(255,119,138,0.10); color: #ffdbe0; border-radius: 14px; display: flex; gap: 8px; align-items: center; }
+.listen-inline { justify-content: flex-start; }
+.listening-chip { max-width: fit-content; padding: 6px 10px; border-radius: 999px; font-size: 12px; line-height: 1.2; border: 1px solid rgba(94,230,255,0.40); background: rgba(94,230,255,0.12); color: #c9f5ff; }
 .composer { display: grid; grid-template-columns: auto auto 1fr auto; gap: 10px; padding: 16px; border-top: 1px solid var(--line); background: rgba(3,10,16,0.42); }
 .round-button { width: 48px; height: 48px; border-radius: 50%; padding: 0; display: flex; align-items: center; justify-content: center; }
 .round-button.active { background: rgba(114, 242, 166, 0.18); border-color: var(--ok); }
