@@ -106,7 +106,7 @@ function App() {
           onStatus: setModelStatus
         });
       } else {
-        const clientGeo = isWeatherQuery(text) ? await getBrowserGeo() : null;
+        const clientGeo = needsGeoLookup(text) ? await getBrowserGeo() : null;
         const response = await fetch(`${API_BASE}/api/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -383,7 +383,16 @@ function RobotFace({ mood }) {
 }
 
 function isWeatherQuery(text) {
-  return /(weather|temperature|forecast|rain|snow|wind|outside|humidity)/i.test(String(text || ''));
+  return /(weather|temperature|forecast|rain|snow|wind|outside|humidity|jacket|umbrella)/i.test(String(text || ''));
+}
+
+function isNearbyPlacesQuery(text) {
+  return /(restaurant|food|eat|dinner|lunch|breakfast|cafe|coffee|near me|around me|around my area|around my location)/i.test(String(text || ''));
+}
+
+function needsGeoLookup(text) {
+  const q = String(text || '');
+  return isWeatherQuery(q) || isNearbyPlacesQuery(q);
 }
 
 function getBrowserGeo() {

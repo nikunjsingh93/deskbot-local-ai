@@ -186,6 +186,38 @@ app.post('/api/chat', async (req, res) => {
     }
   }
 
+  // Direct nearby places lookup to avoid fabricated recommendations.
+  if (isNearbyPlacesIntent(userText)) {
+    try {
+      const directGeo = normalizeClientGeo(req.body?.clientGeo);
+      const geo = await resolveGeo(directGeo);
+      if (!geo) {
+        return res.json({
+          reply: 'I could not determine your location for nearby places yet. Please allow location access, then ask again.',
+          savedMemory: null,
+          memoriesUsed: [],
+          stats: { mode: 'direct_places', ok: false, reason: 'missing_location' }
+        });
+      }
+      const places = await fetchNearbyPlaces(userText, geo);
+      const reply = formatNearbyPlacesReply(userText, geo, places);
+      return res.json({
+        reply,
+        savedMemory: null,
+        memoriesUsed: [],
+        stats: { mode: 'direct_places', ok: true, count: places.length }
+      });
+    } catch (err) {
+      log('WARN', 'Direct places handler failed', { error: err.message });
+      return res.json({
+        reply: 'I could not fetch nearby places right now. Please try again in a moment.',
+        savedMemory: null,
+        memoriesUsed: [],
+        stats: { mode: 'direct_places', ok: false, reason: 'fetch_failed' }
+      });
+    }
+  }
+
   const now = Date.now();
   if (now < cooldownUntil) {
     const seconds = Math.ceil((cooldownUntil - now) / 1000);
@@ -585,6 +617,11 @@ function isWeatherIntent(text) {
   return /(weather|temperature|forecast|rain|snow|wind|outside|humidity)/.test(q);
 }
 
+function isNearbyPlacesIntent(text) {
+  const q = String(text || '').toLowerCase();
+  return /(restaurant|food|eat|dinner|lunch|breakfast|cafe|coffee|near me|around my area|around me|nearby)/.test(q);
+}
+
 async function resolveGeo(clientGeo) {
   if (clientGeo) return clientGeo;
   try {
@@ -680,6 +717,142 @@ function shouldWearJacket(temp, feels, wind, code) {
   if (cold || windy) return 'Yes, a jacket is recommended.';
   if (rainy) return 'A light rain layer is a good idea.';
   return 'You probably do not need a jacket right now.';
+}
+
+async function fetchNearbyPlaces(userText, geo) {
+  const q = String(userText || '').toLowerCase();
+  const wantsMexican = /mexican|taco|burrito|quesadilla|enchilada/.test(q);
+  const wantsCafe = /cafe|coffee/.test(q);
+  const radius = 3500; // meters
+
+  const tags = [];
+  if (wantsCafe) {
+    tags.push('["amenity"="cafe"]');
+  } else {
+    tags.push('["amenity"~"restaurant|fast_food"]');
+  }
+  if (wantsMexican) {
+    tags.push('["cuisine"~"mexican|taco|tex-mex",i]');
+  }
+  const tagFilter = tags.join('');
+
+  const query = `
+[out:json][timeout:20];
+(
+  node(around:${radius},${geo.latitude},${geo.longitude})${tagFilter};
+  way(around:${radius},${geo.latitude},${geo.longitude})${tagFilter};
+  relation(around:${radius},${geo.latitude},${geo.longitude})${tagFilter};
+);
+out center tags 30;
+`;
+
+  const data = await fetchOverpassWithFallback(query);
+
+  const elements = Array.isArray(data?.elements) ? data.elements : [];
+  const withCoords = elements
+    .map((el) => {
+      const lat = Number(el?.lat ?? el?.center?.lat);
+      const lon = Number(el?.lon ?? el?.center?.lon);
+      const name = sanitizeText(el?.tags?.name || '', 120);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon) || !name) return null;
+      const distanceKm = haversineKm(geo.latitude, geo.longitude, lat, lon);
+      return {
+        name,
+        distanceKm,
+        cuisine: sanitizeText(el?.tags?.cuisine || '', 80),
+        area: sanitizeText(el?.tags?.['addr:city'] || el?.tags?.['addr:suburb'] || '', 80)
+      };
+    })
+    .filter(Boolean);
+
+  // Deduplicate by name and keep closest.
+  const byName = new Map();
+  for (const p of withCoords) {
+    const key = p.name.toLowerCase();
+    const prev = byName.get(key);
+    if (!prev || p.distanceKm < prev.distanceKm) byName.set(key, p);
+  }
+  return [...byName.values()].sort((a, b) => a.distanceKm - b.distanceKm).slice(0, 8);
+}
+
+async function fetchOverpassWithFallback(query) {
+  const endpoints = [
+    'https://overpass-api.de/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter'
+  ];
+
+  let lastError = null;
+  for (const endpoint of endpoints) {
+    try {
+      // Try POST (preferred).
+      const postData = await fetchOverpass(endpoint, {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+          'User-Agent': 'DeskBotLocalAI/1.0 (local nearby search)'
+        },
+        body: `data=${encodeURIComponent(query)}`
+      });
+      return postData;
+    } catch (err) {
+      lastError = err;
+      try {
+        // Fallback to GET for endpoints that reject POST format.
+        const url = `${endpoint}?data=${encodeURIComponent(query)}`;
+        const getData = await fetchOverpass(url, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'DeskBotLocalAI/1.0 (local nearby search)'
+          }
+        });
+        return getData;
+      } catch (err2) {
+        lastError = err2;
+      }
+    }
+  }
+  throw lastError || new Error('All Overpass endpoints failed.');
+}
+
+async function fetchOverpass(url, options) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    const text = await response.text();
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${text.slice(0, 200)}`);
+    return text ? JSON.parse(text) : {};
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function formatNearbyPlacesReply(userText, geo, places) {
+  const loc = [geo.city, geo.region, geo.country].filter(Boolean).join(', ') || 'your area';
+  if (!places.length) {
+    return `I could not find strong nearby matches in ${loc} right now. Try asking with a broader term like "restaurants near me" or increase search area.`;
+  }
+  const q = String(userText || '').toLowerCase();
+  const header = /mexican|taco|burrito|enchilada/.test(q)
+    ? `Here are nearby Mexican options around ${loc}:`
+    : `Here are nearby places around ${loc}:`;
+  const lines = places.map((p, i) => {
+    const cuisine = p.cuisine ? ` · ${p.cuisine}` : '';
+    const area = p.area ? ` · ${p.area}` : '';
+    return `${i + 1}. ${p.name} (${p.distanceKm.toFixed(1)} km away${cuisine}${area})`;
+  });
+  return `${header}\n\n${lines.join('\n')}\n\nThese are from live map data near your current location.`;
+}
+
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const toRad = (d) => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 6371 * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
 }
 
 function weatherCodeToText(code) {
