@@ -4,6 +4,8 @@ const KOKORO_VOICE = 'af_bella';
 let ttsInstance = null;
 let ttsLoadPromise = null;
 let ttsDevice = '';
+let currentPlayer = null;
+let stopRequested = false;
 const MAX_TTS_CHUNK_CHARS = 320;
 
 function toProgressText(progress) {
@@ -63,27 +65,45 @@ async function loadKokoro(onStatus) {
 
 export async function speakWithKokoro(text, { onStatus, voice }) {
   const notify = typeof onStatus === 'function' ? onStatus : () => {};
+  stopRequested = false;
   const tts = await loadKokoro(notify);
   const chunks = splitForTts(text, MAX_TTS_CHUNK_CHARS);
   for (let i = 0; i < chunks.length; i += 1) {
+    if (stopRequested) break;
     notify(`Generating local neural voice (${ttsDevice.toUpperCase()})... ${i + 1}/${chunks.length}`);
     const audio = await tts.generate(chunks[i], {
       voice: voice || KOKORO_VOICE,
       speed: 1
     });
+    if (stopRequested) break;
 
     const blob = audio.toBlob();
     const url = URL.createObjectURL(blob);
     try {
       await new Promise((resolve, reject) => {
         const player = new Audio(url);
+        currentPlayer = player;
         player.onended = () => resolve();
         player.onerror = () => reject(new Error('Kokoro audio playback failed.'));
         player.play().catch(reject);
       });
     } finally {
+      currentPlayer = null;
       URL.revokeObjectURL(url);
     }
+  }
+}
+
+export function stopKokoroPlayback() {
+  stopRequested = true;
+  if (currentPlayer) {
+    try {
+      currentPlayer.pause();
+      currentPlayer.currentTime = 0;
+    } catch {
+      // no-op
+    }
+    currentPlayer = null;
   }
 }
 

@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { Bot, Mic, MicOff, Send, Settings, Trash2, RefreshCw, Volume2, VolumeX, Database, AlertTriangle, X } from 'lucide-react';
 import './styles.css';
 import { runStandaloneChat } from './standaloneLLM.js';
-import { speakWithKokoro } from './localTTS.js';
+import { speakWithKokoro, stopKokoroPlayback } from './localTTS.js';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 const STORAGE_KEY = 'deskbot_minimal_safe_v1';
@@ -229,6 +229,7 @@ function App() {
 
     if (!cleanText) return;
 
+    stopKokoroPlayback();
     if (settings.ttsEngine === 'kokoro') {
       try {
         window.speechSynthesis.cancel();
@@ -339,6 +340,23 @@ function App() {
           <form className="composer" onSubmit={(e) => { e.preventDefault(); sendMessage(); }}>
             <button type="button" className={`round-button ${listening ? 'active' : ''}`} onClick={toggleListening} disabled={busy} title="Voice input">
               {listening ? <MicOff /> : <Mic />}
+            </button>
+            <button
+              type="button"
+              className={`round-button ${settings.ttsEnabled ? '' : 'active'}`}
+              onClick={() => {
+                const nextEnabled = !settings.ttsEnabled;
+                updateSettings({ ttsEnabled: nextEnabled });
+                if (!nextEnabled) {
+                  window.speechSynthesis.cancel();
+                  stopKokoroPlayback();
+                  setModelStatus('');
+                }
+              }}
+              disabled={busy}
+              title={settings.ttsEnabled ? 'Mute voice replies' : 'Unmute voice replies'}
+            >
+              {settings.ttsEnabled ? <Volume2 /> : <VolumeX />}
             </button>
             <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask DeskBot, or say: Remember that I prefer simple Docker setups..." disabled={busy} />
             <button type="submit" className="send-button" disabled={busy || !input.trim()}><Send size={18} /> Send</button>
