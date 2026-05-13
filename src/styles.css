@@ -70,6 +70,7 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
 .robot-stage::before { content: ''; position: absolute; inset: 14%; background: radial-gradient(circle, rgba(94,230,255,0.14), transparent 65%); filter: blur(10px); }
 .robot-status { margin-top: 22px; font-weight: 700; color: var(--accent); z-index: 1; }
 .model-line { margin-top: 8px; color: var(--muted); font-size: 13px; z-index: 1; }
+.model-status-live { margin-top: 10px; color: var(--accent); font-size: 13px; text-align: center; z-index: 1; max-width: 90%; }
 .robot-face { position: relative; width: 250px; height: 310px; z-index: 1; }
 .antenna { width: 4px; height: 46px; background: linear-gradient(var(--accent), transparent); position: absolute; top: 0; left: 50%; transform: translateX(-50%); border-radius: 99px; }
 .antenna::before { content: ''; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 25px var(--accent); position: absolute; top: -8px; left: -7px; }

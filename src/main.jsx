@@ -2,16 +2,19 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Bot, Mic, MicOff, Send, Settings, Trash2, RefreshCw, Volume2, VolumeX, Database, AlertTriangle, X } from 'lucide-react';
 import './styles.css';
+import { runStandaloneChat } from './standaloneLLM.js';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 const STORAGE_KEY = 'deskbot_minimal_safe_v1';
+const DEFAULT_STANDALONE_MODEL = 'onnx-community/SmolLM2-360M-Instruct-ONNX';
 
 const defaultSettings = {
   provider: 'ollama',
   ollamaBaseUrl: 'http://192.168.1.213:11434',
-  ollamaModel: 'qwen2.5:0.5b',
+  ollamaModel: '',
   openaiBaseUrl: 'http://localhost:1234/v1',
   openaiModel: '',
+  standaloneModel: 'onnx-community/SmolLM2-360M-Instruct-ONNX',
   ttsEnabled: true,
   autoSpeak: true
 };
@@ -34,7 +37,11 @@ function App() {
   const chatEndRef = useRef(null);
   const recognitionRef = useRef(null);
 
-  const activeModel = settings.provider === 'ollama' ? settings.ollamaModel : settings.openaiModel;
+  const activeModel = settings.provider === 'ollama'
+    ? settings.ollamaModel
+    : settings.provider === 'openai'
+      ? settings.openaiModel
+      : (settings.standaloneModel || DEFAULT_STANDALONE_MODEL);
   const activeBaseUrl = settings.provider === 'ollama' ? settings.ollamaBaseUrl : settings.openaiBaseUrl;
 
   useEffect(() => {
@@ -45,6 +52,12 @@ function App() {
     refreshMemories();
     fetch('/api/health').catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!settings.standaloneModel) {
+      updateSettings({ standaloneModel: DEFAULT_STANDALONE_MODEL });
+    }
+  }, [settings.standaloneModel]);
 
   function updateSettings(patch) {
     setSettings((prev) => ({ ...prev, ...patch }));
@@ -57,33 +70,53 @@ function App() {
     setInput('');
     setBusy(true);
     setMood('thinking');
+    if (settings.provider === 'standalone') {
+      setModelStatus('Preparing standalone model...');
+    } else if (settings.provider === 'ollama') {
+      setModelStatus('Loading Ollama model and generating reply...');
+    } else {
+      setModelStatus('Loading model and generating reply...');
+    }
 
     const nextMessages = [...messages, { role: 'user', content: text }];
     setMessages(nextMessages);
 
     try {
-      const response = await fetch(`${API_BASE}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: settings.provider,
-          baseUrl: activeBaseUrl,
-          model: activeModel,
+      let data;
+      if (settings.provider === 'standalone') {
+        data = await runStandaloneChat({
+          messages: nextMessages.slice(-8),
           userText: text,
-          messages: nextMessages.slice(-8)
-        })
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Chat request failed.');
+          model: settings.standaloneModel,
+          onStatus: setModelStatus
+        });
+      } else {
+        const response = await fetch(`${API_BASE}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            provider: settings.provider,
+            baseUrl: activeBaseUrl,
+            model: activeModel,
+            userText: text,
+            messages: nextMessages.slice(-8)
+          })
+        });
+        data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Chat request failed.');
+      }
+
       const assistantMessage = { role: 'assistant', content: data.reply, savedMemory: data.savedMemory, stats: data.stats };
       setMessages([...nextMessages, assistantMessage]);
       setMood(data.savedMemory ? 'happy' : 'idle');
       if (settings.ttsEnabled && settings.autoSpeak) speak(data.reply);
       if (data.savedMemory) refreshMemories();
+      setModelStatus('');
     } catch (err) {
       setError(err.message || String(err));
       setMessages([...nextMessages, { role: 'assistant', content: `I stopped: ${err.message || err}` }]);
       setMood('worried');
+      setModelStatus('Request failed.');
     } finally {
       setBusy(false);
       window.setTimeout(() => setMood('idle'), 1400);
@@ -91,6 +124,19 @@ function App() {
   }
 
   async function fetchModels() {
+    if (settings.provider === 'standalone') {
+      const standaloneModels = [
+        { name: 'onnx-community/SmolLM2-360M-Instruct-ONNX' },
+        { name: 'onnx-community/SmolLM2-135M-Instruct-ONNX-MHA' }
+      ];
+      setModels(standaloneModels);
+      setModelStatus('Standalone model list ready. First run downloads and caches model files in your browser.');
+      if (!settings.standaloneModel) {
+        updateSettings({ standaloneModel: standaloneModels[0].name });
+      }
+      return;
+    }
+
     setModelStatus('Fetching models...');
     setModels([]);
     try {
@@ -210,9 +256,12 @@ function App() {
         <section className="robot-stage">
           <RobotFace mood={mood} />
           <div className="robot-status">
-            {busy ? 'Thinking safely...' : listening ? 'Listening...' : 'Ready'}
+            {busy ? 'Thinking...' : listening ? 'Listening...' : 'Ready'}
           </div>
-          <div className="model-line">{settings.provider === 'ollama' ? 'Ollama' : 'LM Studio/OpenAI'} · {activeModel || 'no model selected'}</div>
+          <div className="model-line">
+            {settings.provider === 'ollama' ? 'Ollama' : settings.provider === 'openai' ? 'LM Studio/OpenAI' : 'Standalone (WebGPU)'} · {activeModel || 'no model selected'}
+          </div>
+          {(busy || modelStatus) && <div className="model-status-live">{modelStatus || 'Working...'}</div>}
         </section>
 
         <section className="chat-panel">
@@ -300,6 +349,7 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
             <select value={settings.provider} onChange={(e) => updateSettings({ provider: e.target.value })}>
               <option value="ollama">Ollama</option>
               <option value="openai">LM Studio / OpenAI-compatible</option>
+              <option value="standalone">Standalone (Browser WebGPU)</option>
             </select>
 
             {settings.provider === 'ollama' ? (
@@ -312,7 +362,7 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
                   {allowedModels.map((m) => <option key={m.name} value={m.name}>{m.name}{m.sizeGb ? ` · ${m.sizeGb.toFixed(2)} GB` : ''}</option>)}
                 </select>
               </>
-            ) : (
+            ) : settings.provider === 'openai' ? (
               <>
                 <label>LM Studio/OpenAI Base URL</label>
                 <input value={settings.openaiBaseUrl} onChange={(e) => updateSettings({ openaiBaseUrl: e.target.value })} />
@@ -321,6 +371,15 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
                   <option value="">Select after fetching models</option>
                   {models.map((m) => <option key={m.name} value={m.name}>{m.name}</option>)}
                 </select>
+              </>
+            ) : (
+              <>
+                <label>Standalone Model</label>
+                <select value={settings.standaloneModel} onChange={(e) => updateSettings({ standaloneModel: e.target.value })}>
+                  <option value="onnx-community/SmolLM2-360M-Instruct-ONNX">SmolLM2 360M (better quality)</option>
+                  <option value="onnx-community/SmolLM2-135M-Instruct-ONNX-MHA">SmolLM2 135M (faster)</option>
+                </select>
+                <p className="muted small">First message downloads model files into browser cache. WebGPU is used when available, with CPU fallback.</p>
               </>
             )}
 

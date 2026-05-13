@@ -15,6 +15,7 @@ A minimal React + Vite + Node + SQLite starter for a cute desktop robot assistan
 - Fetch model list button
 - SQLite memory database
 - Memory manager in settings
+- Standalone browser mode (WebGPU) with local model download/cache
 - Automatic memory saving for phrases like:
   - `Remember that I prefer simple Docker setups.`
   - `Note that my server IP is 192.168.1.213.`
@@ -40,6 +41,20 @@ cp .env.example .env
 npm install
 npm run dev
 ```
+
+## Standalone Mode (No Ollama / No LM Studio)
+
+You can run DeskBot fully local in the browser:
+
+1. Open Settings → Model
+2. Set Provider to `Standalone (Browser WebGPU)`
+3. Choose a small model (`SmolLM2 360M` or `SmolLM2 135M`)
+4. Start chatting
+
+Notes:
+- First run downloads model files and caches them in browser storage.
+- If WebGPU is unavailable, DeskBot falls back to CPU/WASM mode automatically.
+- This mode does not require Ollama or LM Studio.
 
 Open:
 
