@@ -4,6 +4,7 @@ const KOKORO_VOICE = 'af_bella';
 let ttsInstance = null;
 let ttsLoadPromise = null;
 let ttsDevice = '';
+const MAX_TTS_CHUNK_CHARS = 320;
 
 function toProgressText(progress) {
   if (!progress || typeof progress !== 'object') return '';
@@ -63,22 +64,54 @@ async function loadKokoro(onStatus) {
 export async function speakWithKokoro(text, { onStatus, voice }) {
   const notify = typeof onStatus === 'function' ? onStatus : () => {};
   const tts = await loadKokoro(notify);
-  notify(`Generating local neural voice (${ttsDevice.toUpperCase()})...`);
-  const audio = await tts.generate(text, {
-    voice: voice || KOKORO_VOICE,
-    speed: 1
-  });
-
-  const blob = audio.toBlob();
-  const url = URL.createObjectURL(blob);
-  try {
-    await new Promise((resolve, reject) => {
-      const player = new Audio(url);
-      player.onended = () => resolve();
-      player.onerror = () => reject(new Error('Kokoro audio playback failed.'));
-      player.play().catch(reject);
+  const chunks = splitForTts(text, MAX_TTS_CHUNK_CHARS);
+  for (let i = 0; i < chunks.length; i += 1) {
+    notify(`Generating local neural voice (${ttsDevice.toUpperCase()})... ${i + 1}/${chunks.length}`);
+    const audio = await tts.generate(chunks[i], {
+      voice: voice || KOKORO_VOICE,
+      speed: 1
     });
-  } finally {
-    URL.revokeObjectURL(url);
+
+    const blob = audio.toBlob();
+    const url = URL.createObjectURL(blob);
+    try {
+      await new Promise((resolve, reject) => {
+        const player = new Audio(url);
+        player.onended = () => resolve();
+        player.onerror = () => reject(new Error('Kokoro audio playback failed.'));
+        player.play().catch(reject);
+      });
+    } finally {
+      URL.revokeObjectURL(url);
+    }
   }
+}
+
+function splitForTts(text, maxChars) {
+  const input = String(text || '').trim();
+  if (!input) return [];
+  const parts = input.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  const out = [];
+
+  for (const part of parts) {
+    if (part.length <= maxChars) {
+      out.push(part);
+      continue;
+    }
+
+    const sentences = part.match(/[^.!?]+[.!?]?/g)?.map((s) => s.trim()).filter(Boolean) || [part];
+    let current = '';
+    for (const sentence of sentences) {
+      const next = current ? `${current} ${sentence}` : sentence;
+      if (next.length <= maxChars) {
+        current = next;
+      } else {
+        if (current) out.push(current);
+        current = sentence;
+      }
+    }
+    if (current) out.push(current);
+  }
+
+  return out.length ? out : [input];
 }

@@ -18,7 +18,7 @@ const config = {
   logDir: resolveFromRoot(process.env.LOG_DIR || './logs'),
   allowedHosts: csvEnv('ALLOWED_LLM_HOSTS', 'localhost,127.0.0.1'),
   ollamaNumCtx: intEnv('OLLAMA_NUM_CTX', 1024),
-  ollamaNumPredict: intEnv('OLLAMA_NUM_PREDICT', 160),
+  ollamaNumPredict: intEnv('OLLAMA_NUM_PREDICT', 640),
   ollamaNumThread: intEnv('OLLAMA_NUM_THREAD', 4),
   ollamaKeepAlive: process.env.OLLAMA_KEEP_ALIVE ?? '0',
   ollamaTemperature: numEnv('OLLAMA_TEMPERATURE', 0.7),

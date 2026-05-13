@@ -88,7 +88,7 @@ export async function runStandaloneChat({ messages, userText, model, onStatus })
   notify(`Running ${modelId} on ${device.toUpperCase()}...`);
 
   const result = await runner(prompt, {
-    max_new_tokens: 120,
+    max_new_tokens: 280,
     do_sample: true,
     temperature: 0.7,
     top_p: 0.9,
