@@ -123,6 +123,9 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
 .memory-list { display: flex; flex-direction: column; gap: 10px; }
 .memory-item { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; border: 1px solid var(--line); border-radius: 16px; padding: 12px; background: rgba(255,255,255,0.05); }
 .logs { min-height: 260px; max-height: 360px; overflow: auto; background: #03070b; border: 1px solid var(--line); border-radius: 16px; padding: 12px; white-space: pre-wrap; color: #bfeaff; }
+.license-list { display: flex; flex-direction: column; gap: 8px; }
+.license-list a { color: var(--accent); text-decoration: none; }
+.license-list a:hover { text-decoration: underline; }
 @media (max-width: 900px) {
   .main-panel { grid-template-columns: 1fr; padding: 12px; }
   .robot-stage { min-height: 330px; }

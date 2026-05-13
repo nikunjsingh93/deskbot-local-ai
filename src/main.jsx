@@ -341,6 +341,7 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
           <button className={tab === 'model' ? 'active' : ''} onClick={() => setTab('model')}>Model</button>
           <button className={tab === 'memory' ? 'active' : ''} onClick={() => { setTab('memory'); refreshMemories(); }}><Database size={16} /> Memory</button>
           <button className={tab === 'diagnostics' ? 'active' : ''} onClick={() => setTab('diagnostics')}>Diagnostics</button>
+          <button className={tab === 'about' ? 'active' : ''} onClick={() => setTab('about')}>About</button>
         </div>
 
         {tab === 'model' && (
@@ -425,6 +426,27 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
           <div className="settings-section">
             <button onClick={refreshLogs}>Refresh backend logs</button>
             <pre className="logs">{logs || 'Click Refresh backend logs.'}</pre>
+          </div>
+        )}
+
+        {tab === 'about' && (
+          <div className="settings-section">
+            <h3>Open Source Licenses</h3>
+            <p className="muted small">This app uses open source packages. License links:</p>
+            <div className="license-list">
+              <a href="https://github.com/facebook/react/blob/main/LICENSE" target="_blank" rel="noreferrer">React (MIT)</a>
+              <a href="https://github.com/facebook/react/blob/main/LICENSE" target="_blank" rel="noreferrer">React DOM (MIT)</a>
+              <a href="https://github.com/vitejs/vite/blob/main/LICENSE.md" target="_blank" rel="noreferrer">Vite (MIT)</a>
+              <a href="https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/LICENSE" target="_blank" rel="noreferrer">@vitejs/plugin-react (MIT)</a>
+              <a href="https://github.com/expressjs/express/blob/master/LICENSE" target="_blank" rel="noreferrer">Express (MIT)</a>
+              <a href="https://github.com/expressjs/cors/blob/master/LICENSE" target="_blank" rel="noreferrer">cors (MIT)</a>
+              <a href="https://github.com/motdotla/dotenv/blob/master/LICENSE" target="_blank" rel="noreferrer">dotenv (BSD-2-Clause)</a>
+              <a href="https://github.com/open-cli-tools/concurrently/blob/main/LICENSE" target="_blank" rel="noreferrer">concurrently (MIT)</a>
+              <a href="https://github.com/WiseLibs/better-sqlite3/blob/master/LICENSE" target="_blank" rel="noreferrer">better-sqlite3 (MIT)</a>
+              <a href="https://sqlite.org/copyright.html" target="_blank" rel="noreferrer">SQLite (Public Domain)</a>
+              <a href="https://github.com/lucide-icons/lucide/blob/main/LICENSE" target="_blank" rel="noreferrer">lucide-react (ISC)</a>
+              <a href="https://github.com/huggingface/transformers.js/blob/main/LICENSE" target="_blank" rel="noreferrer">@huggingface/transformers (Apache-2.0)</a>
+            </div>
           </div>
         )}
       </div>
