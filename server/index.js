@@ -149,9 +149,42 @@ app.post('/api/chat', async (req, res) => {
   const baseUrl = String(req.body?.baseUrl || '');
   const incomingMessages = Array.isArray(req.body?.messages) ? req.body.messages : [];
   const userText = sanitizeText(req.body?.userText || lastUserText(incomingMessages), config.maxMessageChars).trim();
+  const clientGeo = normalizeClientGeo(req.body?.clientGeo);
 
   if (!model) return res.status(400).json({ error: 'Please choose a model first.' });
   if (!userText) return res.status(400).json({ error: 'Message is empty.' });
+
+  // Direct tool-style weather handling to avoid LLM "no realtime access" refusals.
+  if (isWeatherIntent(userText)) {
+    try {
+      const directGeo = normalizeClientGeo(req.body?.clientGeo);
+      const geo = await resolveGeo(directGeo);
+      if (!geo) {
+        return res.json({
+          reply: 'I could not determine your location for weather yet. Please allow location access, then ask again.',
+          savedMemory: null,
+          memoriesUsed: [],
+          stats: { mode: 'direct_weather', ok: false, reason: 'missing_location' }
+        });
+      }
+      const weather = await fetchCurrentWeatherData(geo);
+      const reply = formatWeatherReply(userText, geo, weather);
+      return res.json({
+        reply,
+        savedMemory: null,
+        memoriesUsed: [],
+        stats: { mode: 'direct_weather', ok: true }
+      });
+    } catch (err) {
+      log('WARN', 'Direct weather handler failed', { error: err.message });
+      return res.json({
+        reply: 'I could not fetch live weather right now. Please try again in a moment.',
+        savedMemory: null,
+        memoriesUsed: [],
+        stats: { mode: 'direct_weather', ok: false, reason: 'fetch_failed' }
+      });
+    }
+  }
 
   const now = Date.now();
   if (now < cooldownUntil) {
@@ -169,14 +202,16 @@ app.post('/api/chat', async (req, res) => {
   try {
     const savedMemory = maybeSaveMemory(userText);
     const relevantMemories = findRelevantMemories(userText, 8);
-    const llmMessages = buildMessages(incomingMessages, userText, relevantMemories, savedMemory);
+    const liveContext = await maybeBuildLiveContext(userText, clientGeo);
+    const llmMessages = buildMessages(incomingMessages, userText, relevantMemories, savedMemory, liveContext);
 
     log('INFO', 'Chat request started', {
       provider,
       model,
       messages: llmMessages.length,
       memoryCount: relevantMemories.length,
-      savedMemory: Boolean(savedMemory)
+      savedMemory: Boolean(savedMemory),
+      liveContext: Boolean(liveContext)
     });
 
     let reply = '';
@@ -335,7 +370,7 @@ async function unloadOllamaModel(base, model) {
   });
 }
 
-function buildMessages(incomingMessages, userText, memories, savedMemory) {
+function buildMessages(incomingMessages, userText, memories, savedMemory, liveContext) {
   const safeHistory = incomingMessages
     .filter((m) => m && (m.role === 'user' || m.role === 'assistant'))
     .slice(-config.maxHistoryMessages)
@@ -351,8 +386,9 @@ function buildMessages(incomingMessages, userText, memories, savedMemory) {
     : '- No saved memories matched this message.';
 
   const savedNote = savedMemory ? `\nThe user just asked you to remember this, and it has already been saved: ${savedMemory.content}` : '';
+  const webNote = liveContext ? `\n\nLive web facts (retrieved just now):\n${liveContext}\nUse these facts when relevant and mention that they are current.` : '';
 
-  const system = `You are DeskBot, a small cute robot pet assistant. Be warm, concise, and useful. You can remember user preferences when the app tells you memory was saved. Do not claim you created reminders yet. Use the saved memories only when relevant.\n\nRelevant saved memories:\n${memoryText}${savedNote}`;
+  const system = `You are DeskBot, a small cute robot pet assistant. Be warm, concise, and useful. You can remember user preferences when the app tells you memory was saved. Do not claim you created reminders yet. Use the saved memories only when relevant.\n\nRelevant saved memories:\n${memoryText}${savedNote}${webNote}`;
 
   return [{ role: 'system', content: system }, ...safeHistory];
 }
@@ -515,6 +551,161 @@ function mergeStats(first, second) {
     continuedEvalCount: second?.evalCount,
     continuedTotalDurationMs: second?.totalDurationMs
   };
+}
+
+function normalizeClientGeo(input) {
+  const lat = Number(input?.latitude);
+  const lon = Number(input?.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+  return {
+    latitude: lat,
+    longitude: lon,
+    city: sanitizeText(input?.city || '', 80),
+    region: sanitizeText(input?.region || '', 80),
+    country: sanitizeText(input?.country || '', 80)
+  };
+}
+
+async function maybeBuildLiveContext(userText, clientGeo) {
+  if (!isWeatherIntent(userText)) return '';
+  const geo = await resolveGeo(clientGeo);
+  if (!geo) return 'Could not determine current location for weather lookup.';
+  try {
+    const weather = await fetchCurrentWeather(geo);
+    return weather;
+  } catch (err) {
+    log('WARN', 'Weather lookup failed', { error: err.message });
+    return 'Weather lookup failed right now.';
+  }
+}
+
+function isWeatherIntent(text) {
+  const q = String(text || '').toLowerCase();
+  return /(weather|temperature|forecast|rain|snow|wind|outside|humidity)/.test(q);
+}
+
+async function resolveGeo(clientGeo) {
+  if (clientGeo) return clientGeo;
+  try {
+    const ip = await fetchJson('https://ipapi.co/json/', { timeoutMs: 6000 });
+    const lat = Number(ip?.latitude);
+    const lon = Number(ip?.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    return {
+      latitude: lat,
+      longitude: lon,
+      city: sanitizeText(ip?.city || '', 80),
+      region: sanitizeText(ip?.region || '', 80),
+      country: sanitizeText(ip?.country_name || '', 80)
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchCurrentWeather(geo) {
+  const data = await fetchCurrentWeatherData(geo);
+  return formatWeatherContext(geo, data);
+}
+
+async function fetchCurrentWeatherData(geo) {
+  const params = new URLSearchParams({
+    latitude: String(geo.latitude),
+    longitude: String(geo.longitude),
+    current: 'temperature_2m,apparent_temperature,weather_code,wind_speed_10m',
+    daily: 'temperature_2m_max,temperature_2m_min',
+    timezone: 'auto'
+  });
+  const url = `https://api.open-meteo.com/v1/forecast?${params.toString()}`;
+  return fetchJson(url, { timeoutMs: 8000 });
+}
+
+function formatWeatherContext(geo, data) {
+  const current = data?.current || {};
+  const daily = data?.daily || {};
+  const loc = [geo.city, geo.region, geo.country].filter(Boolean).join(', ') || 'your area';
+  const condition = weatherCodeToText(current.weather_code);
+  const temp = Number(current.temperature_2m);
+  const feels = Number(current.apparent_temperature);
+  const wind = Number(current.wind_speed_10m);
+  const high = Array.isArray(daily.temperature_2m_max) ? daily.temperature_2m_max[0] : null;
+  const low = Array.isArray(daily.temperature_2m_min) ? daily.temperature_2m_min[0] : null;
+  const hiLo = Number.isFinite(high) && Number.isFinite(low) ? ` High ${Math.round(high)}°C / Low ${Math.round(low)}°C.` : '';
+  const tempText = Number.isFinite(temp) ? `${Math.round(temp)}°C` : 'unknown';
+  const feelsText = Number.isFinite(feels) ? `${Math.round(feels)}°C` : 'unknown';
+  const windText = Number.isFinite(wind) ? `${Math.round(wind)} km/h` : 'unknown';
+  return `Location: ${loc}. Current weather: ${condition}. Temperature ${tempText}, feels like ${feelsText}, wind ${windText}.${hiLo}`;
+}
+
+function formatWeatherReply(userText, geo, data) {
+  const q = String(userText || '').toLowerCase();
+  const current = data?.current || {};
+  const daily = data?.daily || {};
+  const loc = [geo.city, geo.region, geo.country].filter(Boolean).join(', ') || 'your area';
+  const temp = Number(current.temperature_2m);
+  const feels = Number(current.apparent_temperature);
+  const wind = Number(current.wind_speed_10m);
+  const code = Number(current.weather_code);
+  const condition = weatherCodeToText(code);
+  const high = Array.isArray(daily.temperature_2m_max) ? daily.temperature_2m_max[0] : null;
+  const low = Array.isArray(daily.temperature_2m_min) ? daily.temperature_2m_min[0] : null;
+
+  const tempText = Number.isFinite(temp) ? `${Math.round(temp)}°C` : 'unknown';
+  const feelsText = Number.isFinite(feels) ? `${Math.round(feels)}°C` : 'unknown';
+  const windText = Number.isFinite(wind) ? `${Math.round(wind)} km/h` : 'unknown';
+  const hiLo = Number.isFinite(high) && Number.isFinite(low) ? ` High ${Math.round(high)}°C / Low ${Math.round(low)}°C.` : '';
+  const summary = `Right now in ${loc}: ${condition}, ${tempText} (feels like ${feelsText}), wind ${windText}.${hiLo}`;
+
+  if (/(jacket|coat|wear)/.test(q)) {
+    const jacket = shouldWearJacket(temp, feels, wind, code);
+    return `${summary} ${jacket}`;
+  }
+  if (/(umbrella|rain)/.test(q)) {
+    const umbrella = shouldCarryUmbrella(code);
+    return `${summary} ${umbrella ? 'Yes, carry an umbrella.' : 'Umbrella is probably not needed right now.'}`;
+  }
+  return summary;
+}
+
+function shouldCarryUmbrella(code) {
+  return [51, 53, 55, 56, 57, 61, 63, 65, 80, 81, 82, 95, 96, 99].includes(Number(code));
+}
+
+function shouldWearJacket(temp, feels, wind, code) {
+  const rainy = shouldCarryUmbrella(code);
+  const cold = Number.isFinite(feels) ? feels <= 16 : Number.isFinite(temp) && temp <= 16;
+  const windy = Number.isFinite(wind) && wind >= 22;
+  if (cold && rainy) return 'Yes, wear a jacket and bring an umbrella.';
+  if (cold || windy) return 'Yes, a jacket is recommended.';
+  if (rainy) return 'A light rain layer is a good idea.';
+  return 'You probably do not need a jacket right now.';
+}
+
+function weatherCodeToText(code) {
+  const c = Number(code);
+  const map = {
+    0: 'clear sky',
+    1: 'mainly clear',
+    2: 'partly cloudy',
+    3: 'overcast',
+    45: 'fog',
+    48: 'depositing rime fog',
+    51: 'light drizzle',
+    53: 'moderate drizzle',
+    55: 'dense drizzle',
+    61: 'slight rain',
+    63: 'moderate rain',
+    65: 'heavy rain',
+    71: 'slight snow',
+    73: 'moderate snow',
+    75: 'heavy snow',
+    80: 'rain showers',
+    81: 'rain showers',
+    82: 'violent rain showers',
+    95: 'thunderstorm'
+  };
+  return map[c] || 'unknown conditions';
 }
 
 function intEnv(name, fallback) {

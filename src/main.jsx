@@ -106,6 +106,7 @@ function App() {
           onStatus: setModelStatus
         });
       } else {
+        const clientGeo = isWeatherQuery(text) ? await getBrowserGeo() : null;
         const response = await fetch(`${API_BASE}/api/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -114,7 +115,8 @@ function App() {
             baseUrl: activeBaseUrl,
             model: activeModel,
             userText: text,
-            messages: nextMessages.slice(-8)
+            messages: nextMessages.slice(-8),
+            clientGeo
           })
         });
         data = await response.json();
@@ -378,6 +380,29 @@ function RobotFace({ mood }) {
       <div className="body-light" />
     </div>
   );
+}
+
+function isWeatherQuery(text) {
+  return /(weather|temperature|forecast|rain|snow|wind|outside|humidity)/i.test(String(text || ''));
+}
+
+function getBrowserGeo() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) {
+      resolve(null);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        resolve({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude
+        });
+      },
+      () => resolve(null),
+      { enableHighAccuracy: false, timeout: 2500, maximumAge: 10 * 60 * 1000 }
+    );
+  });
 }
 
 function SettingsPanel({ settings, updateSettings, close, fetchModels, models, allowedModels, modelStatus, memories, refreshMemories, addMemory, deleteMemory, logs, refreshLogs }) {
