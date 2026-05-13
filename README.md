@@ -1,8 +1,6 @@
-# DeskBot Ollama Starter — Minimal Safe Rewrite
+# DeskBot Ollama Starter
 
 A minimal React + Vite + Node + SQLite starter for a cute desktop robot assistant.
-
-This rewrite is intentionally conservative so it does not overload your Ubuntu Ollama server.
 
 ## Included
 
@@ -22,9 +20,7 @@ This rewrite is intentionally conservative so it does not overload your Ubuntu O
   - `Note that my server IP is 192.168.1.213.`
   - `My favorite model is qwen3:8b.`
 
-## Why this version is safer
-
-This version avoids the overload pattern that can freeze a small local server:
+## Runtime behavior
 
 - No streaming
 - No Ollama polling during normal chat
@@ -35,9 +31,6 @@ This version avoids the overload pattern that can freeze a small local server:
 - Small reply cap: `num_predict=160`
 - Limited chat history sent to model
 - `keep_alive=0` so the model is not kept loaded by this app
-- Blocks Llama/vision/large model names by default
-- Blocks models above 2.5 GB by default when model size is known
-- Manual panic unload button in Settings → Model
 
 ## Install
 
@@ -67,12 +60,12 @@ In Settings:
 ```text
 Provider: Ollama
 Base URL: http://192.168.1.213:11434
-Model: qwen2.5:0.5b
+Model: select after fetching model list
 ```
 
-Click **Fetch model list**. Blocked models will be listed but not selectable.
+Click **Fetch model list** and select any model, including Llama models.
 
-## Recommended Ollama service safety settings
+## Recommended Ollama service settings
 
 On Ubuntu:
 
@@ -114,26 +107,11 @@ npm run logs
 
 Or open Settings → Diagnostics → Refresh backend logs.
 
-## Safe models to start with
+## Changing Ollama request limits
 
-Start with:
-
-```text
-qwen2.5:0.5b
-qwen3:0.6b
-qwen2.5:1.5b
-qwen3:1.7b
-```
-
-Llama models are blocked by default because your server froze after `llama3.2:1b` even though it was not a large model.
-
-## Changing safety rules
-
-Edit `.env` only after the app is stable:
+Edit `.env`:
 
 ```env
-BLOCKED_OLLAMA_MODEL_PATTERNS=llama,llava,vision,moondream,minicpm,70b,65b,34b,32b,30b,27b,24b,22b,14b,13b,12b,11b,10b,8x
-MAX_MODEL_SIZE_GB=2.5
 OLLAMA_NUM_CTX=1024
 OLLAMA_NUM_PREDICT=160
 ```
