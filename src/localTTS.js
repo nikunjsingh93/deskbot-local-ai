@@ -60,12 +60,12 @@ async function loadKokoro(onStatus) {
   }
 }
 
-export async function speakWithKokoro(text, { onStatus }) {
+export async function speakWithKokoro(text, { onStatus, voice }) {
   const notify = typeof onStatus === 'function' ? onStatus : () => {};
   const tts = await loadKokoro(notify);
   notify(`Generating local neural voice (${ttsDevice.toUpperCase()})...`);
   const audio = await tts.generate(text, {
-    voice: KOKORO_VOICE,
+    voice: voice || KOKORO_VOICE,
     speed: 1
   });
 

@@ -18,7 +18,8 @@ const defaultSettings = {
   standaloneModel: 'onnx-community/SmolLM2-360M-Instruct-ONNX',
   ttsEnabled: true,
   autoSpeak: true,
-  ttsEngine: 'browser'
+  ttsEngine: 'browser',
+  kokoroVoice: 'af_bella'
 };
 
 function App() {
@@ -66,6 +67,12 @@ function App() {
       updateSettings({ ttsEngine: 'browser' });
     }
   }, [settings.ttsEngine]);
+
+  useEffect(() => {
+    if (!settings.kokoroVoice) {
+      updateSettings({ kokoroVoice: 'af_bella' });
+    }
+  }, [settings.kokoroVoice]);
 
   function updateSettings(patch) {
     setSettings((prev) => ({ ...prev, ...patch }));
@@ -223,7 +230,10 @@ function App() {
     if (settings.ttsEngine === 'kokoro') {
       try {
         window.speechSynthesis.cancel();
-        await speakWithKokoro(cleanText, { onStatus: setModelStatus });
+        await speakWithKokoro(cleanText, {
+          onStatus: setModelStatus,
+          voice: settings.kokoroVoice || 'af_bella'
+        });
         setModelStatus('');
         return;
       } catch {
@@ -447,7 +457,21 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
               <option value="kokoro">Kokoro local neural TTS</option>
             </select>
             {settings.ttsEngine === 'kokoro' && (
-              <p className="muted small">First use downloads model files locally and caches them in browser storage. If unavailable, DeskBot automatically falls back to browser voice.</p>
+              <>
+                <label>Kokoro Voice</label>
+                <select value={settings.kokoroVoice || 'af_bella'} onChange={(e) => updateSettings({ kokoroVoice: e.target.value })}>
+                  <option value="af_bella">Bella (female)</option>
+                  <option value="af_heart">Heart (female)</option>
+                  <option value="af_nicole">Nicole (female)</option>
+                  <option value="af_sarah">Sarah (female)</option>
+                  <option value="am_michael">Michael (male)</option>
+                  <option value="am_fenrir">Fenrir (male)</option>
+                  <option value="am_puck">Puck (male)</option>
+                  <option value="am_eric">Eric (male)</option>
+                  <option value="am_liam">Liam (male)</option>
+                </select>
+                <p className="muted small">First use downloads model files locally and caches them in browser storage. If unavailable, DeskBot automatically falls back to browser voice.</p>
+              </>
             )}
           </div>
         )}
