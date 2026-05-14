@@ -8,6 +8,7 @@ import { speakWithKokoro, stopKokoroPlayback } from './localTTS.js';
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 const STORAGE_KEY = 'deskbot_minimal_safe_v1';
 const DEFAULT_STANDALONE_MODEL = 'onnx-community/SmolLM2-360M-Instruct-ONNX';
+const FOLLOWUP_WINDOW_MS = 5000;
 const WAKE_SILENCE_SEND_MS = 1200;
 
 const defaultSettings = {
@@ -49,6 +50,8 @@ function App() {
   const wakeCaptureTimerRef = useRef(null);
   const wakeCapturedRef = useRef('');
   const wakeArmedRef = useRef(false);
+  const followupDeadlineRef = useRef(0);
+  const followupTimerRef = useRef(null);
   const wakeEnabledPrevRef = useRef(false);
 
   const activeModel = settings.provider === 'ollama'
@@ -124,6 +127,27 @@ function App() {
     setWakeArmed(next);
   }
 
+  function clearFollowupWindow() {
+    followupDeadlineRef.current = 0;
+    if (followupTimerRef.current) {
+      clearTimeout(followupTimerRef.current);
+      followupTimerRef.current = null;
+    }
+  }
+
+  function openFollowupWindow() {
+    clearFollowupWindow();
+    followupDeadlineRef.current = Date.now() + FOLLOWUP_WINDOW_MS;
+    setWakeArmedState(true);
+    setModelStatus('Listening for follow-up...');
+    followupTimerRef.current = setTimeout(() => {
+      followupDeadlineRef.current = 0;
+      followupTimerRef.current = null;
+      setWakeArmedState(false);
+      if (!busy) setModelStatus('');
+    }, FOLLOWUP_WINDOW_MS);
+  }
+
   function clearChatHistory() {
     setMessages([]);
     setError('');
@@ -194,6 +218,7 @@ function App() {
       setBusy(false);
       window.setTimeout(() => setMood('idle'), 1400);
       if (settings.wakeEnabled) {
+        openFollowupWindow();
         window.setTimeout(() => {
           if (!listening && !speaking) {
             toggleListening();
@@ -280,6 +305,7 @@ function App() {
     if (!('speechSynthesis' in window)) return;
     if (listening) {
       manualStopRef.current = true;
+      clearFollowupWindow();
       if (wakeCaptureTimerRef.current) {
         clearTimeout(wakeCaptureTimerRef.current);
         wakeCaptureTimerRef.current = null;
@@ -390,8 +416,14 @@ function App() {
       setMood('listening');
       wakeCapturedRef.current = '';
       if (settings.wakeEnabled) {
-        setModelStatus(`Wake mode on. Say "${assistantName}" then your question.`);
-        setWakeArmedState(false);
+        const followupActive = Date.now() < followupDeadlineRef.current;
+        if (followupActive) {
+          setWakeArmedState(true);
+          setModelStatus('Listening for follow-up...');
+        } else {
+          setModelStatus(`Wake mode on. Say "${assistantName}" then your question.`);
+          setWakeArmedState(false);
+        }
       }
     };
     recognition.onresult = (event) => {
@@ -402,7 +434,8 @@ function App() {
         const wake = String(settings.wakeWord || 'robot').trim();
         const wakeMatch = findWakeWordMatch(transcript, wake);
         const hasWake = Boolean(wakeMatch);
-        if (!hasWake && !wakeArmedRef.current) return;
+        const followupActive = Date.now() < followupDeadlineRef.current;
+        if (!hasWake && !wakeArmedRef.current && !followupActive) return;
         const withoutWake = hasWake ? wakeMatch.restText : transcript;
         const userQuery = withoutWake.trim().replace(/^[,.:;\s-]+/, '');
         if (!userQuery) {
@@ -411,6 +444,7 @@ function App() {
           setModelStatus(`Heard "${wake}". Now ask your question.`);
           return;
         }
+        clearFollowupWindow();
         setWakeArmedState(true);
         wakeCapturedRef.current = wakeCapturedRef.current
           ? `${wakeCapturedRef.current} ${userQuery}`.trim()
