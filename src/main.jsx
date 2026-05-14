@@ -672,13 +672,13 @@ function App() {
     }
   }
 
-  async function addUser(username, password) {
+  async function addUser(username, password, isAdmin = false) {
     setAdminStatus('');
     try {
       const response = await apiFetch('/api/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password, settings: defaultSettings })
+        body: JSON.stringify({ username, password, role: isAdmin ? 'admin' : 'user', settings: defaultSettings })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Failed to add user.');
@@ -1424,6 +1424,7 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
   const [newMemory, setNewMemory] = useState('');
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [newIsAdmin, setNewIsAdmin] = useState(false);
   const [usernameDrafts, setUsernameDrafts] = useState({});
   const [passwordDrafts, setPasswordDrafts] = useState({});
   const [modelDrafts, setModelDrafts] = useState({});
@@ -1637,10 +1638,15 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
             <div className="admin-user-form">
               <input value={newUsername} onChange={(e) => setNewUsername(e.target.value)} placeholder="Username" autoComplete="off" />
               <input value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Password" type="password" autoComplete="new-password" />
+              <label className="checkbox-row admin-create-admin">
+                <input type="checkbox" checked={newIsAdmin} onChange={(e) => setNewIsAdmin(e.target.checked)} />
+                Admin
+              </label>
               <button onClick={async () => {
-                await addUser(newUsername, newPassword);
+                await addUser(newUsername, newPassword, newIsAdmin);
                 setNewUsername('');
                 setNewPassword('');
+                setNewIsAdmin(false);
               }}>Add</button>
             </div>
             {adminStatus && <p className="muted">{adminStatus}</p>}
@@ -1671,11 +1677,11 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
                       setPasswordDrafts((prev) => ({ ...prev, [user.id]: '' }));
                     }}>Update password</button>
                     <button
-                      className="icon-button"
-                      onClick={() => deleteUser(user.id)}
-                      disabled={user.role === 'admin'}
-                      title={user.role === 'admin' ? 'The admin user cannot be deleted' : 'Delete user'}
-                    >
+                    className="icon-button"
+                    onClick={() => deleteUser(user.id)}
+                    disabled={user.id === currentUser.id}
+                    title={user.id === currentUser.id ? 'You cannot delete the account you are using' : 'Delete user'}
+                  >
                       <Trash2 size={16} />
                     </button>
                   </div>

@@ -387,7 +387,8 @@ textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(94, 230
 .checkbox-row input { width: auto; }
 .memory-list { display: flex; flex-direction: column; gap: 10px; }
 .memory-item { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; border: 1px solid var(--line); border-radius: 16px; padding: 12px; background: rgba(255,255,255,0.05); }
-.admin-user-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 10px; }
+.admin-user-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto; gap: 10px; align-items: center; }
+.admin-create-admin { min-height: 44px; padding: 0 8px; }
 .admin-user-item { display: flex; flex-direction: column; align-items: stretch; gap: 14px; }
 .admin-user-top { display: grid; grid-template-columns: minmax(150px, 1.1fr) minmax(140px, 1fr) auto minmax(140px, 1fr) auto auto; gap: 10px; align-items: center; }
 .admin-user-meta { min-width: 0; }

@@ -160,14 +160,15 @@ app.get('/api/users', requireAdmin, (_req, res) => {
 app.post('/api/users', requireAdmin, (req, res) => {
   const username = sanitizeUsername(req.body?.username || '');
   const password = String(req.body?.password || '');
+  const role = req.body?.role === 'admin' ? 'admin' : 'user';
   if (!username) return res.status(400).json({ error: 'Username is required.' });
   if (password.length < 1) return res.status(400).json({ error: 'Password is required.' });
   if (getUserByUsername.get(username)) return res.status(409).json({ error: 'Username already exists.' });
   const hashed = hashPassword(password);
   const settings = JSON.stringify(req.body?.settings && typeof req.body.settings === 'object' ? req.body.settings : {});
   const allowedModels = JSON.stringify(sanitizeModelList(req.body?.allowedModels));
-  const info = insertUser.run(username, hashed.hash, hashed.salt, 'user', settings, allowedModels);
-  log('INFO', 'User created', { userId: info.lastInsertRowid, username });
+  const info = insertUser.run(username, hashed.hash, hashed.salt, role, settings, allowedModels);
+  log('INFO', 'User created', { userId: info.lastInsertRowid, username, role });
   res.json({ ok: true, user: publicUser(getUserById.get(info.lastInsertRowid)) });
 });
 
@@ -201,8 +202,12 @@ app.delete('/api/users/:id', requireAdmin, (req, res) => {
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid user id.' });
   const user = getUserById.get(id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
+  if (user.id === req.user.id) {
+    return res.status(400).json({ error: 'You cannot delete the admin account you are currently using.' });
+  }
   if (user.role === 'admin') {
-    return res.status(400).json({ error: 'The admin user cannot be deleted.' });
+    const adminCount = db.prepare('SELECT COUNT(*) AS count FROM users WHERE role = ?').get('admin').count;
+    if (adminCount <= 1) return res.status(400).json({ error: 'At least one admin user must remain.' });
   }
   deleteUserById.run(id);
   deleteSessionsForUser.run(id);
@@ -1388,8 +1393,8 @@ function ensureColumn(table, column, definition) {
 
 function seedDefaultAdmin() {
   const username = sanitizeUsername(config.defaultAdminUsername) || 'admin';
-  const existing = getUserByUsernameSafe(username);
-  let adminId = existing?.id;
+  const existingAdmin = db.prepare('SELECT id FROM users WHERE role = ? ORDER BY id ASC LIMIT 1').get('admin');
+  let adminId = existingAdmin?.id;
   if (!adminId) {
     const hashed = hashPassword(config.defaultAdminPassword || 'admin');
     const info = db.prepare('INSERT INTO users (username, password_hash, password_salt, role, settings_json, allowed_models_json) VALUES (?, ?, ?, ?, ?, ?)')
