@@ -92,7 +92,8 @@ const defaultSettings = {
   kokoroVoice: 'af_bella',
   wakeEnabled: false,
   wakeWord: 'buddy',
-  uiTheme: 'bot-chat'
+  uiTheme: 'bot-chat',
+  timeFormat: '12h'
 };
 
 function App() {
@@ -755,6 +756,7 @@ function App() {
   const isWeatherTheme = ['clock-weather', 'clock-weather-big'].includes(uiTheme);
   const isBigClockTheme = ['clock-big', 'clock-weather-big'].includes(uiTheme);
   const clockDate = now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+  const clockDisplay = formatClockDisplay(now, settings.timeFormat || '12h');
   const voiceButton = !settings.wakeEnabled && (
     <button type="button" className={`round-button ${listening ? 'active' : ''}`} onClick={toggleListening} disabled={busy} title="Voice input">
       {listening ? <MicOff /> : <Mic />}
@@ -799,7 +801,10 @@ function App() {
                 )}
               </div>
             )}
-            <div className="clock-time">{now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>
+            <div className="clock-time">
+              <span className="clock-time-main">{clockDisplay.time}</span>
+              {clockDisplay.period && <span className="clock-period">{clockDisplay.period}</span>}
+            </div>
             {!isBigClockTheme && <div className="clock-date">{clockDate}</div>}
             {isWeatherTheme && !isBigClockTheme && (
               <WeatherPanel dashboardWeather={dashboardWeather} />
@@ -922,6 +927,22 @@ function WeatherPanel({ dashboardWeather }) {
       )}
     </div>
   );
+}
+
+function formatClockDisplay(date, timeFormat) {
+  const hour12 = timeFormat !== '24h';
+  const parts = new Intl.DateTimeFormat([], {
+    hour: hour12 ? 'numeric' : '2-digit',
+    minute: '2-digit',
+    hour12
+  }).formatToParts(date);
+  const period = hour12 ? parts.find((part) => part.type === 'dayPeriod')?.value?.toUpperCase() || '' : '';
+  const time = parts
+    .filter((part) => part.type !== 'dayPeriod')
+    .map((part) => part.value)
+    .join('')
+    .trim();
+  return { time, period };
 }
 
 function RobotFace({ mood }) {
@@ -1199,6 +1220,11 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
                 <span>Big Clock + Weather</span>
               </button>
             </div>
+            <label>Clock format</label>
+            <select value={settings.timeFormat || '12h'} onChange={(e) => updateSettings({ timeFormat: e.target.value })}>
+              <option value="12h">AM/PM</option>
+              <option value="24h">24 hour</option>
+            </select>
           </div>
         )}
 

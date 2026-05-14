@@ -150,7 +150,9 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
   box-shadow: none;
 }
 .clock-stage::before { content: ''; position: absolute; inset: 18%; border: 1px solid rgba(94,230,255,0.14); border-radius: 50%; transform: rotate(-8deg); }
-.clock-time { z-index: 1; font-size: clamp(72px, 14vw, 168px); font-weight: 800; line-height: 0.9; color: var(--text); font-variant-numeric: tabular-nums; }
+.clock-time { z-index: 1; width: 100%; display: flex; align-items: baseline; justify-content: center; gap: 0.08em; text-align: center; font-size: clamp(72px, 14vw, 168px); font-weight: 800; line-height: 0.9; color: var(--text); font-variant-numeric: tabular-nums; }
+.clock-time-main { display: block; }
+.clock-period { display: block; font-size: 0.24em; line-height: 1; color: var(--accent); }
 .theme-clock-big .clock-stage,
 .theme-clock-weather-big .clock-stage {
   padding: clamp(16px, 4vw, 42px);
@@ -354,15 +356,30 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
 @media (max-width: 768px) {
   .theme-clock-big .clock-corner,
   .theme-clock-weather-big .clock-corner {
-    font-size: 17px;
+    font-size: 20px;
   }
   .theme-clock-big .clock-corner-date,
   .theme-clock-weather-big .clock-corner-date {
-    font-size: 18px;
+    font-size: 22px;
   }
   .theme-clock-weather-big .clock-corner-weather-details {
-    font-size: 13px;
-    max-width: 50vw;
+    font-size: 16px;
+    max-width: 54vw;
+  }
+}
+
+@media (orientation: portrait) {
+  .clock-stage {
+    align-items: center;
+  }
+  .clock-time {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.02em;
+  }
+  .clock-period {
+    font-size: 0.22em;
   }
 }
 
