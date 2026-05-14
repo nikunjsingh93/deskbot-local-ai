@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { Bot, Clock3, CloudSun, Mic, MicOff, Send, Settings, Trash2, RefreshCw, Volume2, VolumeX, Database, AlertTriangle, X } from 'lucide-react';
 import './styles.css';
 import { runStandaloneChat } from './standaloneLLM.js';
-import { speakWithKokoro, stopKokoroPlayback } from './localTTS.js';
+import { primeKokoroAudio, speakWithKokoro, stopKokoroPlayback } from './localTTS.js';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 const STORAGE_KEY = 'deskbot_minimal_safe_v1';
@@ -62,6 +62,7 @@ function App() {
   const followupDeadlineRef = useRef(0);
   const followupTimerRef = useRef(null);
   const wakeEnabledPrevRef = useRef(false);
+  const wakeCapturedFollowupRef = useRef(false);
 
   const activeModel = settings.provider === 'ollama'
     ? settings.ollamaModel
@@ -77,6 +78,18 @@ function App() {
   useEffect(() => {
     refreshMemories();
     fetch('/api/health').catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const primeAudio = () => primeKokoroAudio();
+    window.addEventListener('pointerdown', primeAudio, { once: true });
+    window.addEventListener('keydown', primeAudio, { once: true });
+    window.addEventListener('touchstart', primeAudio, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', primeAudio);
+      window.removeEventListener('keydown', primeAudio);
+      window.removeEventListener('touchstart', primeAudio);
+    };
   }, []);
 
   useEffect(() => {
@@ -211,7 +224,7 @@ function App() {
     }
   }
 
-  async function sendMessage(textOverride) {
+  async function sendMessage(textOverride, options = {}) {
     const text = (textOverride ?? input).trim();
     if (!text || busy) return;
     setError('');
@@ -226,7 +239,7 @@ function App() {
       setModelStatus('Loading model and generating reply...');
     }
 
-    const chatContext = isFollowupQuestion(text) ? messages : [];
+    const chatContext = options.preserveContext || isFollowupQuestion(text) ? messages : [];
     const nextMessages = [...chatContext, { role: 'user', content: text }];
     setMessages(nextMessages);
 
@@ -478,6 +491,7 @@ function App() {
       setListening(true);
       setMood('listening');
       wakeCapturedRef.current = '';
+      wakeCapturedFollowupRef.current = false;
       if (settings.wakeEnabled) {
         const followupActive = Date.now() < followupDeadlineRef.current;
         if (followupActive) {
@@ -507,6 +521,7 @@ function App() {
           setModelStatus(`Heard "${wake}". Now ask your question.`);
           return;
         }
+        wakeCapturedFollowupRef.current = wakeCapturedFollowupRef.current || followupActive || isFollowupQuestion(userQuery);
         clearFollowupWindow();
         setWakeArmedState(true);
         wakeCapturedRef.current = wakeCapturedRef.current
@@ -544,14 +559,16 @@ function App() {
         wakeCaptureTimerRef.current = null;
       }
       const capturedQuery = wakeCapturedRef.current.trim();
+      const capturedWasFollowup = wakeCapturedFollowupRef.current;
       setListening(false);
       setMood('idle');
       setWakeArmedState(false);
       wakeCapturedRef.current = '';
+      wakeCapturedFollowupRef.current = false;
       if (settings.wakeEnabled && capturedQuery) {
         setInput(capturedQuery);
         if (!busy) {
-          sendMessage(capturedQuery);
+          sendMessage(capturedQuery, { preserveContext: capturedWasFollowup });
           return;
         }
       }

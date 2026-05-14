@@ -6,7 +6,9 @@ let ttsLoadPromise = null;
 let ttsDevice = '';
 let currentPlayer = null;
 let stopRequested = false;
+let audioPrimed = false;
 const MAX_TTS_CHUNK_CHARS = 320;
+const SILENT_WAV = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQQAAAAAAA==';
 
 function toProgressText(progress) {
   if (!progress || typeof progress !== 'object') return '';
@@ -85,12 +87,31 @@ export async function speakWithKokoro(text, { onStatus, voice }) {
         currentPlayer = player;
         player.onended = () => resolve();
         player.onerror = () => reject(new Error('Kokoro audio playback failed.'));
-        player.play().catch(reject);
+        playWithGestureRetry(player, notify).catch(reject);
       });
     } finally {
       currentPlayer = null;
       URL.revokeObjectURL(url);
     }
+  }
+}
+
+export function primeKokoroAudio() {
+  if (audioPrimed || typeof Audio === 'undefined') return;
+  audioPrimed = true;
+  try {
+    const player = new Audio(SILENT_WAV);
+    player.muted = true;
+    player.play()
+      .then(() => {
+        player.pause();
+        player.currentTime = 0;
+      })
+      .catch(() => {
+        // Some browsers still reject silent priming. Real playback will wait for a gesture.
+      });
+  } catch {
+    // no-op
   }
 }
 
@@ -134,4 +155,41 @@ function splitForTts(text, maxChars) {
   }
 
   return out.length ? out : [input];
+}
+
+async function playWithGestureRetry(player, notify) {
+  try {
+    await player.play();
+    return;
+  } catch (err) {
+    if (!isGestureRequiredError(err)) throw err;
+  }
+
+  notify('Click or press any key once to enable Kokoro voice playback...');
+  await waitForAudioGesture();
+  if (stopRequested) return;
+  await player.play();
+}
+
+function isGestureRequiredError(err) {
+  const text = `${err?.name || ''} ${err?.message || err || ''}`.toLowerCase();
+  return text.includes('notallowed') || text.includes('interact') || text.includes('user activation') || text.includes('gesture');
+}
+
+function waitForAudioGesture() {
+  return new Promise((resolve) => {
+    const done = () => {
+      cleanup();
+      primeKokoroAudio();
+      resolve();
+    };
+    const cleanup = () => {
+      window.removeEventListener('pointerdown', done);
+      window.removeEventListener('keydown', done);
+      window.removeEventListener('touchstart', done);
+    };
+    window.addEventListener('pointerdown', done, { once: true });
+    window.addEventListener('keydown', done, { once: true });
+    window.addEventListener('touchstart', done, { once: true });
+  });
 }
