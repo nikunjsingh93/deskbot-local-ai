@@ -757,6 +757,7 @@ function App() {
   const isBigClockTheme = ['clock-big', 'clock-weather-big'].includes(uiTheme);
   const clockDate = now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
   const clockDisplay = formatClockDisplay(now, settings.timeFormat || '12h');
+  const robotStatusText = busy ? 'Thinking...' : speaking ? 'Speaking...' : listening ? 'Listening...' : 'Ready';
   const voiceButton = !settings.wakeEnabled && (
     <button type="button" className={`round-button ${listening ? 'active' : ''}`} onClick={toggleListening} disabled={busy} title="Voice input">
       {listening ? <MicOff /> : <Mic />}
@@ -810,7 +811,7 @@ function App() {
               <WeatherPanel dashboardWeather={dashboardWeather} />
             )}
             <div className="robot-status">
-              {busy ? 'Thinking...' : listening ? 'Listening...' : 'Ready'}
+              {robotStatusText}
             </div>
             {(busy || modelStatus) && <div className="model-status-live">{modelStatus || 'Working...'}</div>}
             {error && <div className="stage-error"><AlertTriangle size={16} /> {error}</div>}
@@ -818,9 +819,9 @@ function App() {
           </section>
         ) : (
           <section className="robot-stage">
-            <RobotFace mood={mood} />
+            <RobotFace mood={mood} speaking={speaking} />
             <div className="robot-status">
-              {busy ? 'Thinking...' : listening ? 'Listening...' : 'Ready'}
+              {robotStatusText}
             </div>
             <div className="model-line">
               {settings.provider === 'ollama' ? 'Ollama' : settings.provider === 'openai' ? 'LM Studio/OpenAI' : 'Standalone (WebGPU)'} · {activeModel || 'no model selected'}
@@ -945,9 +946,9 @@ function formatClockDisplay(date, timeFormat) {
   return { time, period };
 }
 
-function RobotFace({ mood }) {
+function RobotFace({ mood, speaking }) {
   return (
-    <div className={`robot-face ${mood}`}>
+    <div className={`robot-face ${mood} ${speaking ? 'speaking' : ''}`}>
       <div className="antenna" />
       <div className="head">
         <div className="eye left"><div className="pupil" /></div>
