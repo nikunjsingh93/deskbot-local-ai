@@ -1218,7 +1218,7 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
               onChange={(e) => updateSettings({ wakeWord: e.target.value })}
               placeholder="buddy"
             />
-            <p className="muted small">Wake is off by default. Turn it on, then say the wake word and your question, for example: "buddy what is the weather?".</p>
+            <p className="muted small">Wake is off by default. Turn it on, then say the wake word and your question, for example: "buddy what is the weather?". On Android, browser speech recognition can pause or stop in the background, so wake mode may not work reliably.</p>
           </div>
         )}
 
