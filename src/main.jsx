@@ -11,6 +11,12 @@ const DEFAULT_STANDALONE_MODEL = 'onnx-community/SmolLM2-360M-Instruct-ONNX';
 const FOLLOWUP_WINDOW_MS = 5000;
 const WAKE_SILENCE_SEND_MS = 1200;
 
+function isFollowupQuestion(text) {
+  const normalized = String(text || '').trim().toLowerCase();
+  return /\b(that|this|it|those|they|them|he|she|same|again|another|more|continue|previous|earlier)\b/.test(normalized)
+    || /^(yes|no|why|how|what about|and|also|tell me more|go on)\b/.test(normalized);
+}
+
 const defaultSettings = {
   provider: 'ollama',
   ollamaBaseUrl: 'http://192.168.1.213:11434',
@@ -220,7 +226,8 @@ function App() {
       setModelStatus('Loading model and generating reply...');
     }
 
-    const nextMessages = [...messages, { role: 'user', content: text }];
+    const chatContext = isFollowupQuestion(text) ? messages : [];
+    const nextMessages = [...chatContext, { role: 'user', content: text }];
     setMessages(nextMessages);
 
     try {

@@ -321,7 +321,7 @@ app.post('/api/chat', async (req, res) => {
       throw new DeskBotError('Unknown provider.');
     }
 
-    reply = reply.trim() || 'I got an empty response from the model.';
+    reply = cleanupReply(reply, incomingMessages, userText).trim() || 'I got an empty response from the model.';
     insertMessageLog.run(provider, model, userText, reply);
     log('INFO', 'Chat request completed', { provider, model, totalMs: Date.now() - started, ...stats });
     res.json({ reply, savedMemory, memoriesUsed: relevantMemories, stats });
@@ -444,10 +444,17 @@ async function unloadOllamaModel(base, model) {
 }
 
 function buildMessages(incomingMessages, userText, memories, savedMemory, liveContext) {
-  const safeHistory = incomingMessages
+  const wantsHistory = shouldUseConversationHistory(userText);
+  const safeHistory = (wantsHistory ? incomingMessages : incomingMessages.slice(-1))
     .filter((m) => m && (m.role === 'user' || m.role === 'assistant'))
     .slice(-config.maxHistoryMessages)
-    .map((m) => ({ role: m.role, content: sanitizeText(m.content || '', config.maxMessageChars) }))
+    .map((m) => ({
+      role: m.role,
+      content: sanitizeText(
+        m.content || '',
+        m.role === 'assistant' ? Math.min(config.maxMessageChars, 420) : Math.min(config.maxMessageChars, 700)
+      )
+    }))
     .filter((m) => m.content.trim());
 
   if (!safeHistory.some((m) => m.role === 'user' && m.content.trim() === userText)) {
@@ -461,9 +468,15 @@ function buildMessages(incomingMessages, userText, memories, savedMemory, liveCo
   const savedNote = savedMemory ? `\nThe user just asked you to remember this, and it has already been saved: ${savedMemory.content}` : '';
   const webNote = liveContext ? `\n\nLive web facts (retrieved just now):\n${liveContext}\nUse these facts when relevant and mention that they are current.` : '';
 
-  const system = `You are DeskBot, a small cute robot pet assistant. Be warm, concise, and useful. You can remember user preferences when the app tells you memory was saved. Do not claim you created reminders yet. Use the saved memories only when relevant.\n\nRelevant saved memories:\n${memoryText}${savedNote}${webNote}`;
+  const system = `You are DeskBot, a small cute robot pet assistant. Answer the user's latest message only. Be warm, concise, and useful. Do not continue or repeat old assistant messages. Ignore prior topics unless the latest message clearly asks a follow-up. You can remember user preferences when the app tells you memory was saved. Do not claim you created reminders yet. Use the saved memories only when relevant.\n\nRelevant saved memories:\n${memoryText}${savedNote}${webNote}`;
 
   return [{ role: 'system', content: system }, ...safeHistory];
+}
+
+function shouldUseConversationHistory(userText) {
+  const text = String(userText || '').toLowerCase();
+  return /\b(that|this|it|those|they|them|he|she|same|again|another|more|continue|previous|earlier)\b/.test(text)
+    || /^(yes|no|why|how|what about|and|also)\b/.test(text.trim());
 }
 
 function maybeSaveMemory(text) {
@@ -508,16 +521,53 @@ function findRelevantMemories(query, limit = 8) {
   const memories = getMemories.all();
   if (!memories.length) return [];
   const terms = query.toLowerCase().split(/[^a-z0-9.:-]+/i).filter((w) => w.length >= 3).slice(0, 20);
+  const identityQuery = /\b(who am i|my name|what(?:'s| is) my name|do you know me)\b/i.test(query);
   const scored = memories.map((m) => {
     const haystack = `${m.content} ${m.tags || ''}`.toLowerCase();
     let score = 0;
     for (const term of terms) {
       if (haystack.includes(term)) score += 2;
     }
-    if (score === 0) score = 0.1; // keep a few recent memories available even without lexical match
+    if (identityQuery && /\b(user'?s name|name is|called)\b/i.test(m.content)) score += 4;
     return { ...m, score };
-  });
+  }).filter((m) => m.score > 0);
   return scored.sort((a, b) => b.score - a.score || b.id - a.id).slice(0, limit);
+}
+
+function cleanupReply(reply, incomingMessages, userText) {
+  let text = sanitizeText(reply || '', config.maxMessageChars).trim();
+  if (!text) return text;
+
+  const priorAssistantText = incomingMessages
+    .filter((m) => m?.role === 'assistant')
+    .map((m) => String(m.content || ''))
+    .join('\n')
+    .toLowerCase();
+  const userTerms = new Set(
+    String(userText || '')
+      .toLowerCase()
+      .split(/[^a-z0-9]+/i)
+      .filter((term) => term.length >= 4)
+  );
+  const seen = new Set();
+  const parts = text.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [text];
+  const kept = [];
+
+  for (const rawPart of parts) {
+    const sentence = rawPart.trim();
+    if (!sentence) continue;
+    const normalized = sentence.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    if (!normalized) continue;
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+
+    const overlapsUser = [...userTerms].some((term) => normalized.includes(term));
+    const copiedFromPrior = normalized.length > 70 && priorAssistantText.includes(normalized);
+    if (copiedFromPrior && !overlapsUser) continue;
+    kept.push(sentence);
+  }
+
+  return kept.join(' ').trim() || text;
 }
 
 function lastUserText(messages) {
