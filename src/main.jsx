@@ -1647,28 +1647,38 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
             <div className="memory-list">
               {users.map((user) => (
                 <div className="memory-item admin-user-item" key={user.id}>
-                  <div>
-                    <strong>{user.username}</strong> <span className="muted small">{user.role}</span>
-                    <div className="muted small">Created {user.created_at}</div>
+                  <div className="admin-user-top">
+                    <div className="admin-user-meta">
+                      <strong>{user.username}</strong> <span className="muted small">{user.role}</span>
+                      <div className="muted small">Created {user.created_at}</div>
+                    </div>
+                    <input
+                      value={usernameDrafts[user.id] ?? user.username}
+                      onChange={(e) => setUsernameDrafts((prev) => ({ ...prev, [user.id]: e.target.value }))}
+                      placeholder="Username"
+                      autoComplete="off"
+                    />
+                    <button onClick={() => updateUserName(user.id, usernameDrafts[user.id] ?? user.username)}>Save name</button>
+                    <input
+                      value={passwordDrafts[user.id] || ''}
+                      onChange={(e) => setPasswordDrafts((prev) => ({ ...prev, [user.id]: e.target.value }))}
+                      placeholder="New password"
+                      type="password"
+                      autoComplete="new-password"
+                    />
+                    <button onClick={async () => {
+                      await updateUserPassword(user.id, passwordDrafts[user.id] || '');
+                      setPasswordDrafts((prev) => ({ ...prev, [user.id]: '' }));
+                    }}>Update password</button>
+                    <button
+                      className="icon-button"
+                      onClick={() => deleteUser(user.id)}
+                      disabled={user.role === 'admin'}
+                      title={user.role === 'admin' ? 'The admin user cannot be deleted' : 'Delete user'}
+                    >
+                      <Trash2 size={16} />
+                    </button>
                   </div>
-                  <input
-                    value={usernameDrafts[user.id] ?? user.username}
-                    onChange={(e) => setUsernameDrafts((prev) => ({ ...prev, [user.id]: e.target.value }))}
-                    placeholder="Username"
-                    autoComplete="off"
-                  />
-                  <button onClick={() => updateUserName(user.id, usernameDrafts[user.id] ?? user.username)}>Save name</button>
-                  <input
-                    value={passwordDrafts[user.id] || ''}
-                    onChange={(e) => setPasswordDrafts((prev) => ({ ...prev, [user.id]: e.target.value }))}
-                    placeholder="New password"
-                    type="password"
-                    autoComplete="new-password"
-                  />
-                  <button onClick={async () => {
-                    await updateUserPassword(user.id, passwordDrafts[user.id] || '');
-                    setPasswordDrafts((prev) => ({ ...prev, [user.id]: '' }));
-                  }}>Update</button>
                   <div className="admin-model-access">
                     <label>Allowed models</label>
                     <textarea
@@ -1711,14 +1721,6 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
                       }}>Allow all</button>
                     </div>
                   </div>
-                  <button
-                    className="icon-button"
-                    onClick={() => deleteUser(user.id)}
-                    disabled={user.role === 'admin'}
-                    title={user.role === 'admin' ? 'The admin user cannot be deleted' : 'Delete user'}
-                  >
-                    <Trash2 size={16} />
-                  </button>
                 </div>
               ))}
             </div>
