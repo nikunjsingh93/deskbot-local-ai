@@ -1,4 +1,4 @@
-# DeskBot Ollama Starter
+# <img src="public/icons/icon-192.png" width="34" height="34" alt="Deskbot icon" align="center"> Deskbot Local AI
 
 A minimal React + Vite + Node + SQLite starter for a cute desktop robot assistant.
 
@@ -93,40 +93,6 @@ Model: select after fetching model list
 ```
 
 Click **Fetch model list** and select any model, including Llama models.
-
-## Recommended Ollama service settings
-
-On Ubuntu:
-
-```bash
-sudo systemctl edit ollama
-```
-
-Paste:
-
-```ini
-[Service]
-Environment="OLLAMA_HOST=0.0.0.0:11434"
-Environment="OLLAMA_MAX_LOADED_MODELS=1"
-Environment="OLLAMA_NUM_PARALLEL=1"
-Environment="OLLAMA_MAX_QUEUE=1"
-Environment="OLLAMA_KEEP_ALIVE=1m"
-Environment="OLLAMA_CONTEXT_LENGTH=1024"
-Environment="OLLAMA_LLM_LIBRARY=cpu_avx2"
-```
-
-Then:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl restart ollama
-```
-
-Check logs:
-
-```bash
-journalctl -u ollama -n 80 --no-pager
-```
 
 ## DeskBot logs
 
