@@ -1,6 +1,6 @@
 # <img src="public/icons/icon-192.png" width="34" height="34" alt="Deskbot icon" align="center"> Deskbot Local AI
 
-A minimal React + Vite + Node + SQLite starter for a cute desktop robot assistant.
+A local AI robot assistant for chat, voice, memory, weather, and clock displays, powered by Ollama, LM Studio or browser-local models.
 
 ## Screenshots
 
