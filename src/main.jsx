@@ -10,6 +10,7 @@ const STORAGE_KEY = 'deskbot_minimal_safe_v1';
 const DEFAULT_STANDALONE_MODEL = 'onnx-community/SmolLM2-360M-Instruct-ONNX';
 const FOLLOWUP_WINDOW_MS = 5000;
 const WAKE_SILENCE_SEND_MS = 1200;
+const DUPLICATE_REPLY_ERROR = 'DeskBot is already waiting for a model reply.';
 
 function isFollowupQuestion(text) {
   const normalized = String(text || '').trim().toLowerCase();
@@ -130,6 +131,8 @@ function App() {
   const followupTimerRef = useRef(null);
   const wakeEnabledPrevRef = useRef(false);
   const wakeCapturedFollowupRef = useRef(false);
+  const requestActiveRef = useRef(false);
+  const errorClearTimerRef = useRef(null);
 
   const activeModel = settings.provider === 'ollama'
     ? settings.ollamaModel
@@ -234,6 +237,24 @@ function App() {
     const timer = window.setInterval(refreshDashboardWeather, 60 * 60 * 1000);
     return () => window.clearInterval(timer);
   }, [settings.uiTheme]);
+
+  useEffect(() => {
+    if (errorClearTimerRef.current) {
+      window.clearTimeout(errorClearTimerRef.current);
+      errorClearTimerRef.current = null;
+    }
+    if (!error.includes(DUPLICATE_REPLY_ERROR)) return undefined;
+    errorClearTimerRef.current = window.setTimeout(() => {
+      setError((current) => current.includes(DUPLICATE_REPLY_ERROR) ? '' : current);
+      errorClearTimerRef.current = null;
+    }, 5000);
+    return () => {
+      if (errorClearTimerRef.current) {
+        window.clearTimeout(errorClearTimerRef.current);
+        errorClearTimerRef.current = null;
+      }
+    };
+  }, [error]);
 
   useEffect(() => {
     const wasEnabled = wakeEnabledPrevRef.current;
@@ -350,7 +371,8 @@ function App() {
         : (currentSettings.standaloneModel || DEFAULT_STANDALONE_MODEL);
     const currentActiveBaseUrl = currentSettings.provider === 'ollama' ? currentSettings.ollamaBaseUrl : currentSettings.openaiBaseUrl;
     const text = (textOverride ?? input).trim();
-    if (!text || busy) return;
+    if (!text || requestActiveRef.current) return;
+    requestActiveRef.current = true;
     setError('');
     setInput('');
     setBusy(true);
@@ -415,6 +437,7 @@ function App() {
       setMood('worried');
       setModelStatus('Request failed.');
     } finally {
+      requestActiveRef.current = false;
       setBusy(false);
       setClockRobotActive(false);
       window.setTimeout(() => setMood('idle'), 1400);
@@ -612,7 +635,7 @@ function App() {
   }
 
   function toggleListening() {
-    if (speaking) return;
+    if (speaking || requestActiveRef.current) return;
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
       setError('Speech recognition is not available in this browser. Chrome works best.');
@@ -738,7 +761,7 @@ function App() {
       wakeCapturedFollowupRef.current = false;
       if (settings.wakeEnabled && capturedQuery) {
         setInput(capturedQuery);
-        if (!busy) {
+        if (!requestActiveRef.current) {
           sendMessage(capturedQuery, { preserveContext: capturedWasFollowup });
           return;
         }
@@ -769,7 +792,7 @@ function App() {
   const robotStatusText = busy ? 'Thinking...' : speaking ? 'Speaking...' : listening ? 'Listening...' : 'Ready';
   const clockConversationActive = isClockTheme && (clockRobotActive || busy || speaking);
   const voiceButton = !settings.wakeEnabled && (
-    <button type="button" className={`round-button ${listening ? 'active' : ''}`} onClick={toggleListening} disabled={busy} title="Voice input">
+    <button type="button" className={`round-button ${listening ? 'active' : ''}`} onClick={toggleListening} disabled={busy || speaking} title="Voice input">
       {listening ? <MicOff /> : <Mic />}
     </button>
   );
