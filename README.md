@@ -97,7 +97,7 @@ In Settings:
 
 ```text
 Provider: Ollama
-Base URL: http://192.168.1.213:11434
+Base URL: http://your.server.url:11434 #example http://192.168.1.225:11434
 Model: select after fetching model list
 ```
 
