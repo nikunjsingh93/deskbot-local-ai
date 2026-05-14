@@ -109,6 +109,7 @@ function App() {
   const [models, setModels] = useState([]);
   const [modelStatus, setModelStatus] = useState('');
   const [wakeArmed, setWakeArmed] = useState(false);
+  const [clockRobotActive, setClockRobotActive] = useState(false);
   const [memories, setMemories] = useState([]);
   const [logs, setLogs] = useState('');
   const [listening, setListening] = useState(false);
@@ -353,6 +354,7 @@ function App() {
     setError('');
     setInput('');
     setBusy(true);
+    setClockRobotActive(true);
     setMood('thinking');
     if (currentSettings.provider === 'standalone') {
       setModelStatus('Preparing standalone model...');
@@ -414,6 +416,7 @@ function App() {
       setModelStatus('Request failed.');
     } finally {
       setBusy(false);
+      setClockRobotActive(false);
       window.setTimeout(() => setMood('idle'), 1400);
       if (settingsRef.current.wakeEnabled) {
         openFollowupWindow();
@@ -624,12 +627,14 @@ function App() {
       recognitionRef.current?.stop();
       setListening(false);
       setMood('idle');
+      setClockRobotActive(false);
       setWakeArmedState(false);
       wakeCapturedRef.current = '';
       setModelStatus('');
       return;
     }
     manualStopRef.current = false;
+    if (!settings.wakeEnabled) setClockRobotActive(true);
     const recognition = new SpeechRecognition();
     recognition.lang = 'en-US';
     recognition.interimResults = false;
@@ -679,11 +684,13 @@ function App() {
         const withoutWake = hasWake ? wakeMatch.restText : transcript;
         const userQuery = withoutWake.trim().replace(/^[,.:;\s-]+/, '');
         if (!userQuery) {
+          setClockRobotActive(true);
           setWakeArmedState(true);
           wakeCapturedRef.current = '';
           setModelStatus(`Heard "${wake}". Now ask your question.`);
           return;
         }
+        setClockRobotActive(true);
         wakeCapturedFollowupRef.current = wakeCapturedFollowupRef.current || followupActive || isFollowupQuestion(userQuery);
         clearFollowupWindow();
         setWakeArmedState(true);
@@ -702,6 +709,7 @@ function App() {
 
       setInput(transcript);
       if (transcript) {
+        setClockRobotActive(true);
         manualStopRef.current = true;
         recognitionRef.current?.stop();
         sendMessage(transcript);
@@ -736,6 +744,7 @@ function App() {
         }
       }
       if (settings.wakeEnabled && !capturedQuery) {
+        setClockRobotActive(false);
         window.setTimeout(() => {
           if (!busy && !speaking && !listening) {
             toggleListening();
@@ -758,6 +767,7 @@ function App() {
   const clockDate = now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
   const clockDisplay = formatClockDisplay(now, settings.timeFormat || '12h');
   const robotStatusText = busy ? 'Thinking...' : speaking ? 'Speaking...' : listening ? 'Listening...' : 'Ready';
+  const clockConversationActive = isClockTheme && (clockRobotActive || busy || speaking);
   const voiceButton = !settings.wakeEnabled && (
     <button type="button" className={`round-button ${listening ? 'active' : ''}`} onClick={toggleListening} disabled={busy} title="Voice input">
       {listening ? <MicOff /> : <Mic />}
@@ -770,52 +780,66 @@ function App() {
 
       <main className={`main-panel theme-${uiTheme}`}>
         {isClockTheme ? (
-          <section className="clock-stage">
-            {isBigClockTheme && (
-              <div className="clock-corners">
-                <div className="clock-corner clock-corner-date">{clockDate}</div>
-                {isWeatherTheme && (
-                  <div className="clock-corner clock-corner-weather">
-                    {dashboardWeather.status === 'ready' && dashboardWeather.data ? (
-                      <>
-                        <div className="clock-corner-weather-main">
-                          <CloudSun size={22} />
-                          <span>{dashboardWeather.data.temperature}°</span>
-                          <strong>{dashboardWeather.data.condition}</strong>
-                        </div>
-                        <div className="clock-corner-weather-details">
-                          Feels {dashboardWeather.data.feelsLike}° · High {dashboardWeather.data.high}° / Low {dashboardWeather.data.low}° · Wind {dashboardWeather.data.wind} km/h
-                        </div>
-                      </>
-                    ) : dashboardWeather.status === 'loading' ? (
-                      <div className="clock-corner-weather-main">
-                        <CloudSun size={22} />
-                        <strong>Loading weather...</strong>
-                      </div>
-                    ) : (
-                      <div className="clock-corner-weather-main">
-                        <CloudSun size={22} />
-                        <strong>Weather unavailable</strong>
+          <section className={`clock-stage ${clockConversationActive ? 'clock-conversation' : ''}`}>
+            {clockConversationActive ? (
+              <>
+                <RobotFace mood={mood} speaking={speaking} />
+                <div className="robot-status">
+                  {robotStatusText}
+                </div>
+                {(busy || modelStatus) && <div className="model-status-live">{modelStatus || 'Working...'}</div>}
+                {error && <div className="stage-error"><AlertTriangle size={16} /> {error}</div>}
+                <div className="stage-actions">{voiceButton}</div>
+              </>
+            ) : (
+              <>
+                {isBigClockTheme && (
+                  <div className="clock-corners">
+                    <div className="clock-corner clock-corner-date">{clockDate}</div>
+                    {isWeatherTheme && (
+                      <div className="clock-corner clock-corner-weather">
+                        {dashboardWeather.status === 'ready' && dashboardWeather.data ? (
+                          <>
+                            <div className="clock-corner-weather-main">
+                              <CloudSun size={22} />
+                              <span>{dashboardWeather.data.temperature}°</span>
+                              <strong>{dashboardWeather.data.condition}</strong>
+                            </div>
+                            <div className="clock-corner-weather-details">
+                              Feels {dashboardWeather.data.feelsLike}° · High {dashboardWeather.data.high}° / Low {dashboardWeather.data.low}° · Wind {dashboardWeather.data.wind} km/h
+                            </div>
+                          </>
+                        ) : dashboardWeather.status === 'loading' ? (
+                          <div className="clock-corner-weather-main">
+                            <CloudSun size={22} />
+                            <strong>Loading weather...</strong>
+                          </div>
+                        ) : (
+                          <div className="clock-corner-weather-main">
+                            <CloudSun size={22} />
+                            <strong>Weather unavailable</strong>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
                 )}
-              </div>
+                <div className="clock-time">
+                  <span className="clock-time-main">{clockDisplay.time}</span>
+                  {clockDisplay.period && <span className="clock-period">{clockDisplay.period}</span>}
+                </div>
+                {!isBigClockTheme && <div className="clock-date">{clockDate}</div>}
+                {isWeatherTheme && !isBigClockTheme && (
+                  <WeatherPanel dashboardWeather={dashboardWeather} />
+                )}
+                <div className="robot-status">
+                  {robotStatusText}
+                </div>
+                {(busy || modelStatus) && <div className="model-status-live">{modelStatus || 'Working...'}</div>}
+                {error && <div className="stage-error"><AlertTriangle size={16} /> {error}</div>}
+                <div className="stage-actions">{voiceButton}</div>
+              </>
             )}
-            <div className="clock-time">
-              <span className="clock-time-main">{clockDisplay.time}</span>
-              {clockDisplay.period && <span className="clock-period">{clockDisplay.period}</span>}
-            </div>
-            {!isBigClockTheme && <div className="clock-date">{clockDate}</div>}
-            {isWeatherTheme && !isBigClockTheme && (
-              <WeatherPanel dashboardWeather={dashboardWeather} />
-            )}
-            <div className="robot-status">
-              {robotStatusText}
-            </div>
-            {(busy || modelStatus) && <div className="model-status-live">{modelStatus || 'Working...'}</div>}
-            {error && <div className="stage-error"><AlertTriangle size={16} /> {error}</div>}
-            <div className="stage-actions">{voiceButton}</div>
           </section>
         ) : (
           <section className="robot-stage">
