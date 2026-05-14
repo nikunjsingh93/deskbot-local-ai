@@ -775,20 +775,25 @@ function App() {
                   <div className="clock-corner clock-corner-weather">
                     {dashboardWeather.status === 'ready' && dashboardWeather.data ? (
                       <>
-                        <CloudSun size={22} />
-                        <span>{dashboardWeather.data.temperature}°</span>
-                        <strong>{dashboardWeather.data.condition}</strong>
+                        <div className="clock-corner-weather-main">
+                          <CloudSun size={22} />
+                          <span>{dashboardWeather.data.temperature}°</span>
+                          <strong>{dashboardWeather.data.condition}</strong>
+                        </div>
+                        <div className="clock-corner-weather-details">
+                          Feels {dashboardWeather.data.feelsLike}° · High {dashboardWeather.data.high}° / Low {dashboardWeather.data.low}° · Wind {dashboardWeather.data.wind} km/h
+                        </div>
                       </>
                     ) : dashboardWeather.status === 'loading' ? (
-                      <>
+                      <div className="clock-corner-weather-main">
                         <CloudSun size={22} />
                         <strong>Loading weather...</strong>
-                      </>
+                      </div>
                     ) : (
-                      <>
+                      <div className="clock-corner-weather-main">
                         <CloudSun size={22} />
                         <strong>Weather unavailable</strong>
-                      </>
+                      </div>
                     )}
                   </div>
                 )}

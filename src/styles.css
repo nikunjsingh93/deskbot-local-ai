@@ -186,16 +186,29 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
 }
 .clock-corner-weather {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-end;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 5px;
   color: var(--text);
   text-align: right;
 }
-.clock-corner-weather span {
+.clock-corner-weather-main {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.clock-corner-weather-main span {
   font-size: clamp(24px, 4vw, 48px);
   line-height: 0.9;
   font-variant-numeric: tabular-nums;
+}
+.clock-corner-weather-details {
+  color: var(--muted);
+  font-size: clamp(11px, 1.4vw, 16px);
+  font-weight: 700;
+  line-height: 1.2;
 }
 .clock-date { z-index: 1; margin-top: 20px; color: var(--muted); font-size: 18px; font-weight: 700; }
 .weather-panel { z-index: 1; margin-top: 22px; display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--text); }
@@ -316,10 +329,12 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
     max-width: 45vw;
     font-size: 13px;
   }
-  .clock-corner-weather { gap: 5px; }
-  .clock-corner-weather svg { width: 16px; height: 16px; }
-  .clock-corner-weather span { font-size: 24px; }
-  .clock-corner-weather strong { max-width: 24vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .clock-corner-weather { gap: 3px; }
+  .clock-corner-weather-main { gap: 5px; }
+  .clock-corner-weather-main svg { width: 16px; height: 16px; }
+  .clock-corner-weather-main span { font-size: 24px; }
+  .clock-corner-weather-main strong { max-width: 24vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .clock-corner-weather-details { max-width: 46vw; font-size: 10px; }
   .weather-panel { margin-top: 14px; }
   .weather-main { font-size: 15px; flex-wrap: wrap; justify-content: center; text-align: center; }
   .weather-main span { font-size: 30px; }
