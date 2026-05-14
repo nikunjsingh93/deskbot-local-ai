@@ -358,7 +358,6 @@ function App() {
   }
 
   async function speak(text) {
-    if (!('speechSynthesis' in window)) return;
     if (listening) {
       manualStopRef.current = true;
       clearFollowupWindow();
@@ -387,18 +386,26 @@ function App() {
       stopKokoroPlayback();
       if (settings.ttsEngine === 'kokoro') {
         try {
-          window.speechSynthesis.cancel();
+          window.speechSynthesis?.cancel();
           await speakWithKokoro(cleanText, {
             onStatus: setModelStatus,
             voice: settings.kokoroVoice || 'af_bella'
           });
           setModelStatus('');
           return;
-        } catch {
-          setModelStatus('Neural TTS unavailable, using default local voice.');
+        } catch (err) {
+          const message = err?.message || String(err);
+          setError(`Kokoro TTS error: ${message}`);
+          setModelStatus('Kokoro TTS failed. Check the browser console for details.');
+          console.error('Kokoro TTS failed', err);
+          return;
         }
       }
 
+      if (!('speechSynthesis' in window)) {
+        setError('Browser TTS is not available in this browser.');
+        return;
+      }
       window.speechSynthesis.cancel();
       const baseRate = 1.0;
       const basePitch = 1.0;
@@ -872,7 +879,7 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
 
             <label className="checkbox-row">
               <input type="checkbox" checked={settings.ttsEnabled} onChange={(e) => updateSettings({ ttsEnabled: e.target.checked })} />
-              {settings.ttsEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />} Browser TTS voice replies
+              {settings.ttsEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />} Voice replies
             </label>
             <label className="checkbox-row">
               <input type="checkbox" checked={settings.autoSpeak} onChange={(e) => updateSettings({ autoSpeak: e.target.checked })} />
@@ -897,7 +904,7 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
                   <option value="am_eric">Eric (male)</option>
                   <option value="am_liam">Liam (male)</option>
                 </select>
-                <p className="muted small">First use downloads model files locally and caches them in browser storage. If unavailable, DeskBot automatically falls back to browser voice.</p>
+                <p className="muted small">First use downloads model files locally and caches them in browser storage. If Kokoro cannot start, DeskBot will show the exact error instead of silently switching voices.</p>
               </>
             )}
             <label className="checkbox-row">
