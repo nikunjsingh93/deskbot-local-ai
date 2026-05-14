@@ -22,7 +22,7 @@ const defaultSettings = {
   ttsEngine: 'browser',
   kokoroVoice: 'af_bella',
   wakeEnabled: false,
-  wakeWord: 'bot'
+  wakeWord: 'robot'
 };
 
 function App() {
@@ -45,9 +45,11 @@ function App() {
   const chatEndRef = useRef(null);
   const recognitionRef = useRef(null);
   const manualStopRef = useRef(false);
+  const ignoreRecognitionErrorRef = useRef(false);
   const wakeCaptureTimerRef = useRef(null);
   const wakeCapturedRef = useRef('');
   const wakeArmedRef = useRef(false);
+  const wakeEnabledPrevRef = useRef(false);
 
   const activeModel = settings.provider === 'ollama'
     ? settings.ollamaModel
@@ -85,9 +87,33 @@ function App() {
 
   useEffect(() => {
     if (!settings.wakeWord) {
-      updateSettings({ wakeWord: 'bot' });
+      updateSettings({ wakeWord: 'robot' });
     }
   }, [settings.wakeWord]);
+
+  useEffect(() => {
+    const wasEnabled = wakeEnabledPrevRef.current;
+    const isEnabled = Boolean(settings.wakeEnabled);
+    wakeEnabledPrevRef.current = isEnabled;
+
+    if (isEnabled && !wasEnabled) {
+      window.setTimeout(() => {
+        if (!busy && !speaking && !listening) {
+          toggleListening();
+        }
+      }, 50);
+      return;
+    }
+
+    if (!isEnabled && wasEnabled && listening) {
+      manualStopRef.current = true;
+      ignoreRecognitionErrorRef.current = true;
+      recognitionRef.current?.stop();
+      setListening(false);
+      setWakeArmedState(false);
+      setModelStatus('');
+    }
+  }, [settings.wakeEnabled, busy, speaking, listening]);
 
   function updateSettings(patch) {
     setSettings((prev) => ({ ...prev, ...patch }));
@@ -98,7 +124,13 @@ function App() {
     setWakeArmed(next);
   }
 
-  const assistantName = String(settings.wakeWord || 'bot').trim() || 'bot';
+  function clearChatHistory() {
+    setMessages([]);
+    setError('');
+    setModelStatus('');
+  }
+
+  const assistantName = String(settings.wakeWord || 'robot').trim() || 'robot';
 
   async function sendMessage(textOverride) {
     const text = (textOverride ?? input).trim();
@@ -345,6 +377,8 @@ function App() {
     };
     recognition.onspeechend = () => {
       if (!settings.wakeEnabled || !wakeArmedRef.current) return;
+      const hasCapturedQuery = Boolean(wakeCapturedRef.current.trim());
+      if (!hasCapturedQuery) return;
       if (wakeCaptureTimerRef.current) clearTimeout(wakeCaptureTimerRef.current);
       wakeCaptureTimerRef.current = setTimeout(() => {
         manualStopRef.current = true;
@@ -365,7 +399,7 @@ function App() {
       if (!transcript) return;
 
       if (settings.wakeEnabled) {
-        const wake = String(settings.wakeWord || 'bot').trim();
+        const wake = String(settings.wakeWord || 'robot').trim();
         const wakeMatch = findWakeWordMatch(transcript, wake);
         const hasWake = Boolean(wakeMatch);
         if (!hasWake && !wakeArmedRef.current) return;
@@ -399,6 +433,10 @@ function App() {
       }
     };
     recognition.onerror = (event) => {
+      if (ignoreRecognitionErrorRef.current) {
+        ignoreRecognitionErrorRef.current = false;
+        return;
+      }
       setError(`Voice input error: ${event.error}`);
       setMood('worried');
     };
@@ -430,7 +468,7 @@ function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div className="brand"><Bot size={22} /> {assistantName}</div>
+        <div className="brand"><Bot size={22} /> DeskBot</div>
         <button className="icon-button" onClick={() => setSettingsOpen(true)} title="Settings"><Settings /></button>
       </header>
 
@@ -471,10 +509,12 @@ function App() {
 
           {error && <div className="error-box"><AlertTriangle size={16} /> {error}</div>}
 
-          <form className="composer" onSubmit={(e) => { e.preventDefault(); sendMessage(); }}>
-            <button type="button" className={`round-button ${listening ? 'active' : ''}`} onClick={toggleListening} disabled={busy} title="Voice input">
-              {listening ? <MicOff /> : <Mic />}
-            </button>
+          <form className={`composer ${settings.wakeEnabled ? 'wake-enabled' : ''}`} onSubmit={(e) => { e.preventDefault(); sendMessage(); }}>
+            {!settings.wakeEnabled && (
+              <button type="button" className={`round-button ${listening ? 'active' : ''}`} onClick={toggleListening} disabled={busy} title="Voice input">
+                {listening ? <MicOff /> : <Mic />}
+              </button>
+            )}
             <button
               type="button"
               className={`round-button ${settings.ttsEnabled ? '' : 'active'}`}
@@ -492,7 +532,7 @@ function App() {
             >
               {settings.ttsEnabled ? <Volume2 /> : <VolumeX />}
             </button>
-            <input value={input} onChange={(e) => setInput(e.target.value)} placeholder={`Ask ${assistantName}, or say: Remember that I prefer simple Docker setups...`} disabled={busy} />
+            <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask DeskBot, or say: Remember that I prefer simple Docker setups..." disabled={busy} />
             <button type="submit" className="send-button" disabled={busy || !input.trim()}><Send size={18} /> Send</button>
           </form>
         </section>
@@ -502,6 +542,7 @@ function App() {
         <SettingsPanel
           settings={settings}
           updateSettings={updateSettings}
+          clearChatHistory={clearChatHistory}
           close={() => setSettingsOpen(false)}
           fetchModels={fetchModels}
           models={models}
@@ -617,7 +658,7 @@ function getBrowserGeo() {
   });
 }
 
-function SettingsPanel({ settings, updateSettings, close, fetchModels, models, allowedModels, modelStatus, memories, refreshMemories, addMemory, deleteMemory, logs, refreshLogs }) {
+function SettingsPanel({ settings, updateSettings, clearChatHistory, close, fetchModels, models, allowedModels, modelStatus, memories, refreshMemories, addMemory, deleteMemory, logs, refreshLogs }) {
   const [tab, setTab] = useState('model');
   const [newMemory, setNewMemory] = useState('');
 
@@ -677,6 +718,7 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
 
             <div className="row-buttons">
               <button onClick={fetchModels}><RefreshCw size={16} /> Fetch model list</button>
+              <button className="danger-light" onClick={clearChatHistory}><Trash2 size={16} /> Clear chat history</button>
             </div>
             {modelStatus && <p className="muted">{modelStatus}</p>}
 
@@ -716,11 +758,11 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
             </label>
             <label>Assistant name / wake word</label>
             <input
-              value={settings.wakeWord || 'bot'}
+              value={settings.wakeWord || 'robot'}
               onChange={(e) => updateSettings({ wakeWord: e.target.value })}
-              placeholder="bot"
+              placeholder="robot"
             />
-            <p className="muted small">Wake is off by default. Turn it on, then say the wake word and your question, for example: "bot what is the weather?".</p>
+            <p className="muted small">Wake is off by default. Turn it on, then say the wake word and your question, for example: "robot what is the weather?".</p>
           </div>
         )}
 

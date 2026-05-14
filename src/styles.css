@@ -103,6 +103,7 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
 .listen-inline { justify-content: flex-start; }
 .listening-chip { max-width: fit-content; padding: 6px 10px; border-radius: 999px; font-size: 12px; line-height: 1.2; border: 1px solid rgba(94,230,255,0.40); background: rgba(94,230,255,0.12); color: #c9f5ff; }
 .composer { display: grid; grid-template-columns: auto auto 1fr auto; gap: 10px; padding: 16px; border-top: 1px solid var(--line); background: rgba(3,10,16,0.42); }
+.composer.wake-enabled { grid-template-columns: auto 1fr auto; }
 .round-button { width: 48px; height: 48px; border-radius: 50%; padding: 0; display: flex; align-items: center; justify-content: center; }
 .round-button.active { background: rgba(114, 242, 166, 0.18); border-color: var(--ok); }
 .send-button { display: flex; align-items: center; gap: 8px; }
@@ -136,5 +137,7 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
   .safe-pill { display: none; }
   .bubble { max-width: 92%; }
   .composer { grid-template-columns: auto auto 1fr; }
+  .composer.wake-enabled { grid-template-columns: auto 1fr auto; }
   .send-button { grid-column: 1 / -1; justify-content: center; }
+  .composer.wake-enabled .send-button { grid-column: auto; }
 }
