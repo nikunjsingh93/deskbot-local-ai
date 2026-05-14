@@ -147,6 +147,7 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
 @keyframes speakingGlow { 0%, 100% { opacity: 0.78; filter: saturate(1); } 50% { opacity: 1; filter: saturate(1.8); } }
 
 @media (prefers-reduced-motion: reduce) {
+  .clock-mode-view,
   .robot-face,
   .robot-face *,
   .robot-face *::before {
@@ -178,6 +179,22 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
   box-shadow: none;
 }
 .clock-stage::before { content: ''; position: absolute; inset: 18%; border: 1px solid rgba(94,230,255,0.14); border-radius: 50%; transform: rotate(-8deg); }
+.clock-mode-view {
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+  animation: clockModeFade 0.28s ease-out both;
+}
+.clock-face-view {
+  min-height: 100%;
+}
+.clock-robot-view {
+  animation-name: clockRobotFade;
+}
 .clock-time { z-index: 1; width: 100%; display: flex; align-items: baseline; justify-content: center; gap: 0.08em; text-align: center; font-size: clamp(72px, 14vw, 168px); font-weight: 800; line-height: 0.9; color: var(--text); font-variant-numeric: tabular-nums; }
 .clock-time-main { display: block; }
 .clock-period { display: block; font-size: 0.24em; line-height: 1; color: var(--accent); }
@@ -245,6 +262,14 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
 .weather-main { display: flex; align-items: center; gap: 10px; font-size: 18px; }
 .weather-main span { font-size: 38px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
 .weather-details { color: var(--muted); font-size: 14px; text-align: center; max-width: min(620px, 92vw); }
+@keyframes clockModeFade {
+  from { opacity: 0; transform: scale(0.985); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes clockRobotFade {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
 .stage-actions { z-index: 1; min-height: 54px; margin-top: 22px; display: flex; align-items: center; justify-content: center; gap: 10px; }
 .theme-bot-only .stage-actions .round-button,
 .theme-clock .stage-actions .round-button,

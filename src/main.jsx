@@ -782,7 +782,7 @@ function App() {
         {isClockTheme ? (
           <section className={`clock-stage ${clockConversationActive ? 'clock-conversation' : ''}`}>
             {clockConversationActive ? (
-              <>
+              <div className="clock-mode-view clock-robot-view">
                 <RobotFace mood={mood} speaking={speaking} />
                 <div className="robot-status">
                   {robotStatusText}
@@ -790,9 +790,9 @@ function App() {
                 {(busy || modelStatus) && <div className="model-status-live">{modelStatus || 'Working...'}</div>}
                 {error && <div className="stage-error"><AlertTriangle size={16} /> {error}</div>}
                 <div className="stage-actions">{voiceButton}</div>
-              </>
+              </div>
             ) : (
-              <>
+              <div className="clock-mode-view clock-face-view">
                 {isBigClockTheme && (
                   <div className="clock-corners">
                     <div className="clock-corner clock-corner-date">{clockDate}</div>
@@ -838,7 +838,7 @@ function App() {
                 {(busy || modelStatus) && <div className="model-status-live">{modelStatus || 'Working...'}</div>}
                 {error && <div className="stage-error"><AlertTriangle size={16} /> {error}</div>}
                 <div className="stage-actions">{voiceButton}</div>
-              </>
+              </div>
             )}
           </section>
         ) : (
