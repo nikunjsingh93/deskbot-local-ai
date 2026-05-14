@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Bot, Clock3, CloudSun, Mic, MicOff, Send, Settings, Trash2, RefreshCw, Volume2, VolumeX, Database, AlertTriangle, X } from 'lucide-react';
+import { Bot, Clock3, CloudSun, Maximize2, Mic, MicOff, Minimize2, Send, Settings, Trash2, RefreshCw, Volume2, VolumeX, Database, AlertTriangle, X } from 'lucide-react';
 import './styles.css';
 import { runStandaloneChat } from './standaloneLLM.js';
 import { preloadKokoroTts, primeKokoroAudio, speakWithKokoro, stopKokoroPlayback } from './localTTS.js';
@@ -112,6 +112,7 @@ function App() {
   const [logs, setLogs] = useState('');
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(Boolean(document.fullscreenElement));
   const [now, setNow] = useState(() => new Date());
   const [dashboardWeather, setDashboardWeather] = useState({ status: 'idle', data: null, error: '' });
   const chatEndRef = useRef(null);
@@ -164,6 +165,12 @@ function App() {
       window.removeEventListener('keydown', primeAudio);
       window.removeEventListener('touchstart', primeAudio);
     };
+  }, []);
+
+  useEffect(() => {
+    const syncFullscreen = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', syncFullscreen);
+    return () => document.removeEventListener('fullscreenchange', syncFullscreen);
   }, []);
 
   useEffect(() => {
@@ -256,6 +263,18 @@ function App() {
       settingsRef.current = next;
       return next;
     });
+  }
+
+  async function toggleFullscreen() {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+      }
+    } catch (err) {
+      setError(`Fullscreen error: ${err?.message || err}`);
+    }
   }
 
   function setWakeArmedState(next) {
@@ -856,6 +875,8 @@ function App() {
           deleteMemory={deleteMemory}
           logs={logs}
           refreshLogs={refreshLogs}
+          isFullscreen={isFullscreen}
+          toggleFullscreen={toggleFullscreen}
         />
       )}
     </div>
@@ -973,7 +994,7 @@ function getBrowserGeo() {
   });
 }
 
-function SettingsPanel({ settings, updateSettings, close, fetchModels, models, allowedModels, modelStatus, memories, refreshMemories, addMemory, deleteMemory, logs, refreshLogs }) {
+function SettingsPanel({ settings, updateSettings, close, fetchModels, models, allowedModels, modelStatus, memories, refreshMemories, addMemory, deleteMemory, logs, refreshLogs, isFullscreen, toggleFullscreen }) {
   const [tab, setTab] = useState('model');
   const [newMemory, setNewMemory] = useState('');
 
@@ -982,7 +1003,12 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
       <div className="settings-modal">
         <div className="modal-header">
           <h2>Settings</h2>
-          <button className="icon-button" onClick={close}><X /></button>
+          <div className="modal-actions">
+            <button className="icon-button" onClick={toggleFullscreen} title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}>
+              {isFullscreen ? <Minimize2 /> : <Maximize2 />}
+            </button>
+            <button className="icon-button" onClick={close} title="Close settings"><X /></button>
+          </div>
         </div>
         <div className="tabs">
           <button className={tab === 'model' ? 'active' : ''} onClick={() => setTab('model')}>Model</button>
