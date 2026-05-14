@@ -56,6 +56,15 @@ npm install
 npm run dev
 ```
 
+Default login:
+
+```text
+Username: admin
+Password: admin
+```
+
+You can change the default admin bootstrap values in `.env` with `DEFAULT_ADMIN_USERNAME` and `DEFAULT_ADMIN_PASSWORD`.
+
 ## Standalone Mode (No Ollama / No LM Studio)
 
 You can run DeskBot fully local in the browser:

@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Bot, Clock3, CloudSun, Maximize2, Mic, MicOff, Minimize2, Send, Settings, Trash2, RefreshCw, Volume2, VolumeX, Database, AlertTriangle, X } from 'lucide-react';
+import { Bot, Clock3, CloudSun, Maximize2, Mic, MicOff, Minimize2, Send, Settings, Trash2, RefreshCw, Volume2, VolumeX, Database, AlertTriangle, X, LogOut, KeyRound, UserPlus } from 'lucide-react';
 import './styles.css';
 import { runStandaloneChat } from './standaloneLLM.js';
 import { preloadKokoroTts, primeKokoroAudio, speakWithKokoro, stopKokoroPlayback } from './localTTS.js';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 const STORAGE_KEY = 'deskbot_minimal_safe_v1';
+const LEGACY_SETTINGS_KEY = 'deskbot_settings_v1';
 const DEFAULT_STANDALONE_MODEL = 'onnx-community/SmolLM2-360M-Instruct-ONNX';
 const FOLLOWUP_WINDOW_MS = 5000;
 const WAKE_SILENCE_SEND_MS = 1200;
@@ -98,8 +99,10 @@ const defaultSettings = {
 };
 
 function App() {
-  const [settings, setSettings] = useLocalState('deskbot_settings_v1', defaultSettings);
-  const [messages, setMessages] = useLocalState(STORAGE_KEY, [
+  const [auth, setAuth] = useState(null);
+  const [loginError, setLoginError] = useState('');
+  const [settings, setSettings] = useState(defaultSettings);
+  const [messages, setMessages] = useState([
     { role: 'assistant', content: 'Hi! I am DeskBot. I can chat and remember things you tell me.' }
   ]);
   const [input, setInput] = useState('');
@@ -112,6 +115,8 @@ function App() {
   const [wakeArmed, setWakeArmed] = useState(false);
   const [clockRobotActive, setClockRobotActive] = useState(false);
   const [memories, setMemories] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [adminStatus, setAdminStatus] = useState('');
   const [logs, setLogs] = useState('');
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
@@ -121,6 +126,7 @@ function App() {
   const chatEndRef = useRef(null);
   const messagesRef = useRef(messages);
   const settingsRef = useRef(settings);
+  const authRef = useRef(auth);
   const recognitionRef = useRef(null);
   const manualStopRef = useRef(false);
   const ignoreRecognitionErrorRef = useRef(false);
@@ -142,23 +148,35 @@ function App() {
   const activeBaseUrl = settings.provider === 'ollama' ? settings.ollamaBaseUrl : settings.openaiBaseUrl;
 
   useEffect(() => {
+    authRef.current = auth;
+  }, [auth]);
+
+  useEffect(() => {
     settingsRef.current = settings;
   }, [settings]);
 
   useEffect(() => {
     messagesRef.current = messages;
+    if (auth?.user?.id) {
+      localStorage.setItem(userMessagesKey(auth.user.id), JSON.stringify(messages));
+    }
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, busy]);
+  }, [messages, busy, auth?.user?.id]);
 
   useEffect(() => {
-    refreshMemories();
-    fetch('/api/health').catch(() => {});
+    fetch(`${API_BASE}/api/health`).catch(() => {});
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch((err) => {
         console.warn('Service worker registration failed', err);
       });
     }
   }, []);
+
+  useEffect(() => {
+    if (!auth) return;
+    refreshMemories();
+    fetchModels();
+  }, [auth?.token]);
 
   useEffect(() => {
     const primeAudio = () => primeKokoroAudio();
@@ -284,6 +302,13 @@ function App() {
     setSettings((prev) => {
       const next = { ...prev, ...patch };
       settingsRef.current = next;
+      if (authRef.current?.token) {
+        apiFetch('/api/settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ settings: next })
+        }).catch(() => undefined);
+      }
       return next;
     });
   }
@@ -327,6 +352,53 @@ function App() {
   }
 
   const assistantName = String(settings.wakeWord || 'buddy').trim() || 'buddy';
+
+  function apiFetch(path, options = {}) {
+    const token = authRef.current?.token;
+    const headers = { ...(options.headers || {}) };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    return fetch(`${API_BASE}${path}`, { ...options, headers });
+  }
+
+  async function login(username, password) {
+    setLoginError('');
+    try {
+      const response = await fetch(`${API_BASE}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Login failed.');
+      const nextAuth = { token: data.token, user: data.user };
+      authRef.current = nextAuth;
+      setAuth(nextAuth);
+      const nextSettings = { ...defaultSettings, ...(data.settings || {}) };
+      settingsRef.current = nextSettings;
+      setSettings(nextSettings);
+      const savedMessages = readUserMessages(data.user.id);
+      messagesRef.current = savedMessages;
+      setMessages(savedMessages);
+      setError('');
+    } catch (err) {
+      setLoginError(err.message || String(err));
+    }
+  }
+
+  async function logout() {
+    await apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+    authRef.current = null;
+    setAuth(null);
+    setSettings(defaultSettings);
+    setMessages([{ role: 'assistant', content: 'Hi! I am DeskBot. I can chat and remember things you tell me.' }]);
+    setMemories([]);
+    setUsers([]);
+    setSettingsOpen(false);
+    setError('');
+    setModelStatus('');
+    stopKokoroPlayback();
+    window.speechSynthesis?.cancel();
+  }
 
   async function refreshDashboardWeather() {
     setDashboardWeather((prev) => ({ ...prev, status: 'loading', error: '' }));
@@ -403,7 +475,7 @@ function App() {
         });
       } else {
         const clientGeo = needsGeoLookup(text) ? await getBrowserGeo() : null;
-        const response = await fetch(`${API_BASE}/api/chat`, {
+        const response = await apiFetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -469,7 +541,7 @@ function App() {
     setModelStatus('Fetching models...');
     setModels([]);
     try {
-      const response = await fetch(`${API_BASE}/api/models`, {
+      const response = await apiFetch('/api/models', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ provider: settings.provider, baseUrl: activeBaseUrl })
@@ -496,7 +568,7 @@ function App() {
 
   async function refreshMemories() {
     try {
-      const response = await fetch(`${API_BASE}/api/memories`);
+      const response = await apiFetch('/api/memories');
       const data = await response.json();
       setMemories(data.memories || []);
     } catch {
@@ -507,7 +579,7 @@ function App() {
   async function addMemory(content) {
     const trimmed = content.trim();
     if (!trimmed) return;
-    await fetch(`${API_BASE}/api/memories`, {
+    await apiFetch('/api/memories', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: trimmed, tags: 'manual' })
@@ -516,13 +588,73 @@ function App() {
   }
 
   async function deleteMemory(id) {
-    await fetch(`${API_BASE}/api/memories/${id}`, { method: 'DELETE' });
+    await apiFetch(`/api/memories/${id}`, { method: 'DELETE' });
     refreshMemories();
   }
 
   async function refreshLogs() {
-    const response = await fetch(`${API_BASE}/api/logs`);
+    const response = await apiFetch('/api/logs');
     setLogs(await response.text());
+  }
+
+  async function refreshUsers() {
+    if (authRef.current?.user?.role !== 'admin') return;
+    setAdminStatus('');
+    try {
+      const response = await apiFetch('/api/users');
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to fetch users.');
+      setUsers(data.users || []);
+    } catch (err) {
+      setAdminStatus(err.message || String(err));
+    }
+  }
+
+  async function addUser(username, password) {
+    setAdminStatus('');
+    try {
+      const response = await apiFetch('/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password, settings: defaultSettings })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to add user.');
+      setAdminStatus(`Added ${data.user.username}.`);
+      await refreshUsers();
+    } catch (err) {
+      setAdminStatus(err.message || String(err));
+    }
+  }
+
+  async function updateUserPassword(id, password) {
+    setAdminStatus('');
+    try {
+      const response = await apiFetch(`/api/users/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Failed to update password.');
+      setAdminStatus('Password updated.');
+      await refreshUsers();
+    } catch (err) {
+      setAdminStatus(err.message || String(err));
+    }
+  }
+
+  async function deleteUser(id) {
+    setAdminStatus('');
+    try {
+      const response = await apiFetch(`/api/users/${id}`, { method: 'DELETE' });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Failed to delete user.');
+      setAdminStatus('User deleted.');
+      await refreshUsers();
+    } catch (err) {
+      setAdminStatus(err.message || String(err));
+    }
   }
 
   async function speak(text) {
@@ -578,7 +710,7 @@ function App() {
           const chunks = splitSpeechText(cleanText);
           for (let i = 0; i < chunks.length; i += 1) {
             setModelStatus(`Generating server neural voice... ${i + 1}/${chunks.length}`);
-            const response = await fetch(`${API_BASE}/api/tts/kokoro`, {
+            const response = await apiFetch('/api/tts/kokoro', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -797,6 +929,10 @@ function App() {
     </button>
   );
 
+  if (!auth) {
+    return <LoginScreen onLogin={login} error={loginError} />;
+  }
+
   return (
     <div className="app-shell">
       <button className="floating-settings icon-button" onClick={() => setSettingsOpen(true)} title="Settings"><Settings /></button>
@@ -946,10 +1082,53 @@ function App() {
           deleteMemory={deleteMemory}
           logs={logs}
           refreshLogs={refreshLogs}
+          currentUser={auth.user}
+          users={users}
+          adminStatus={adminStatus}
+          refreshUsers={refreshUsers}
+          addUser={addUser}
+          updateUserPassword={updateUserPassword}
+          deleteUser={deleteUser}
+          logout={logout}
           isFullscreen={isFullscreen}
           toggleFullscreen={toggleFullscreen}
         />
       )}
+    </div>
+  );
+}
+
+function LoginScreen({ onLogin, error }) {
+  const [username, setUsername] = useState('admin');
+  const [password, setPassword] = useState('admin');
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    setBusy(true);
+    await onLogin(username, password);
+    setBusy(false);
+  }
+
+  return (
+    <div className="login-shell">
+      <form className="login-card" onSubmit={submit}>
+        <div className="login-brand">
+          <img src="/icons/icon-192.png" alt="" />
+          <div>
+            <h1>Deskbot Local AI</h1>
+            <p className="muted">Sign in to continue.</p>
+          </div>
+        </div>
+        <label>Username</label>
+        <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" />
+        <label>Password</label>
+        <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" autoComplete="current-password" />
+        {error && <div className="error-box login-error"><AlertTriangle size={16} /> {error}</div>}
+        <button className="send-button login-button" type="submit" disabled={busy || !username.trim() || !password}>
+          <KeyRound size={18} /> {busy ? 'Signing in...' : 'Sign in'}
+        </button>
+      </form>
     </div>
   );
 }
@@ -1104,9 +1283,12 @@ function getBrowserGeo() {
   });
 }
 
-function SettingsPanel({ settings, updateSettings, close, fetchModels, models, allowedModels, modelStatus, memories, refreshMemories, addMemory, deleteMemory, logs, refreshLogs, isFullscreen, toggleFullscreen }) {
+function SettingsPanel({ settings, updateSettings, close, fetchModels, models, allowedModels, modelStatus, memories, refreshMemories, addMemory, deleteMemory, logs, refreshLogs, currentUser, users, adminStatus, refreshUsers, addUser, updateUserPassword, deleteUser, logout, isFullscreen, toggleFullscreen }) {
   const [tab, setTab] = useState('model');
   const [newMemory, setNewMemory] = useState('');
+  const [newUsername, setNewUsername] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [passwordDrafts, setPasswordDrafts] = useState({});
 
   return (
     <div className="modal-backdrop">
@@ -1124,8 +1306,10 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
           <button className={tab === 'model' ? 'active' : ''} onClick={() => setTab('model')}>Model</button>
           <button className={tab === 'themes' ? 'active' : ''} onClick={() => setTab('themes')}>Themes</button>
           <button className={tab === 'memory' ? 'active' : ''} onClick={() => { setTab('memory'); refreshMemories(); }}><Database size={16} /> Memory</button>
+          {currentUser?.role === 'admin' && <button className={tab === 'admin' ? 'active' : ''} onClick={() => { setTab('admin'); refreshUsers(); }}><UserPlus size={16} /> Admin</button>}
           <button className={tab === 'diagnostics' ? 'active' : ''} onClick={() => setTab('diagnostics')}>Diagnostics</button>
           <button className={tab === 'about' ? 'active' : ''} onClick={() => setTab('about')}>About</button>
+          <button onClick={logout}><LogOut size={16} /> Logout</button>
         </div>
 
         {tab === 'model' && (
@@ -1305,6 +1489,51 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
           </div>
         )}
 
+        {tab === 'admin' && currentUser?.role === 'admin' && (
+          <div className="settings-section">
+            <label>Add user</label>
+            <div className="admin-user-form">
+              <input value={newUsername} onChange={(e) => setNewUsername(e.target.value)} placeholder="Username" autoComplete="off" />
+              <input value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Password" type="password" autoComplete="new-password" />
+              <button onClick={async () => {
+                await addUser(newUsername, newPassword);
+                setNewUsername('');
+                setNewPassword('');
+              }}>Add</button>
+            </div>
+            {adminStatus && <p className="muted">{adminStatus}</p>}
+            <div className="memory-list">
+              {users.map((user) => (
+                <div className="memory-item admin-user-item" key={user.id}>
+                  <div>
+                    <strong>{user.username}</strong> <span className="muted small">{user.role}</span>
+                    <div className="muted small">Created {user.created_at}</div>
+                  </div>
+                  <input
+                    value={passwordDrafts[user.id] || ''}
+                    onChange={(e) => setPasswordDrafts((prev) => ({ ...prev, [user.id]: e.target.value }))}
+                    placeholder="New password"
+                    type="password"
+                    autoComplete="new-password"
+                  />
+                  <button onClick={async () => {
+                    await updateUserPassword(user.id, passwordDrafts[user.id] || '');
+                    setPasswordDrafts((prev) => ({ ...prev, [user.id]: '' }));
+                  }}>Update</button>
+                  <button
+                    className="icon-button"
+                    onClick={() => deleteUser(user.id)}
+                    disabled={user.username === 'admin'}
+                    title={user.username === 'admin' ? 'The default admin user cannot be deleted' : 'Delete user'}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {tab === 'about' && (
           <div className="settings-section">
             <h3>Open Source Licenses</h3>
@@ -1329,6 +1558,21 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
       </div>
     </div>
   );
+}
+
+function userMessagesKey(userId) {
+  return `${STORAGE_KEY}_user_${userId}`;
+}
+
+function readUserMessages(userId) {
+  try {
+    const stored = localStorage.getItem(userMessagesKey(userId));
+    const parsed = stored ? JSON.parse(stored) : null;
+    if (Array.isArray(parsed) && parsed.length) return parsed;
+  } catch {
+    // fall through to starter message
+  }
+  return [{ role: 'assistant', content: 'Hi! I am DeskBot. I can chat and remember things you tell me.' }];
 }
 
 function useLocalState(key, initialValue) {

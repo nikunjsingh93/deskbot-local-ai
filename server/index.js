@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors from 'cors';
@@ -31,7 +32,9 @@ const config = {
   errorCooldownMs: intEnv('OLLAMA_ERROR_COOLDOWN_MS', 30000),
   maxHistoryMessages: intEnv('MAX_HISTORY_MESSAGES', 4),
   maxMessageChars: intEnv('MAX_MESSAGE_CHARS', 1200),
-  explicitUnloadAfterChat: boolEnv('AUTO_EXPLICIT_UNLOAD_AFTER_CHAT', false)
+  explicitUnloadAfterChat: boolEnv('AUTO_EXPLICIT_UNLOAD_AFTER_CHAT', false),
+  defaultAdminUsername: process.env.DEFAULT_ADMIN_USERNAME || 'admin',
+  defaultAdminPassword: process.env.DEFAULT_ADMIN_PASSWORD || 'admin'
 };
 
 fs.mkdirSync(config.dataDir, { recursive: true });
@@ -43,26 +46,52 @@ db.pragma('journal_mode = WAL');
 db.exec(`
 CREATE TABLE IF NOT EXISTS memories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER,
   content TEXT NOT NULL,
   source_text TEXT,
   tags TEXT DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS message_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER,
   provider TEXT,
   model TEXT,
   user_text TEXT,
   assistant_text TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  password_salt TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'user',
+  settings_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `);
 
-const insertMemory = db.prepare('INSERT INTO memories (content, source_text, tags) VALUES (?, ?, ?)');
-const getMemories = db.prepare('SELECT id, content, tags, created_at, updated_at FROM memories ORDER BY id DESC');
-const deleteMemory = db.prepare('DELETE FROM memories WHERE id = ?');
-const insertMessageLog = db.prepare('INSERT INTO message_log (provider, model, user_text, assistant_text) VALUES (?, ?, ?, ?)');
+ensureColumn('memories', 'user_id', 'INTEGER');
+ensureColumn('message_log', 'user_id', 'INTEGER');
+seedDefaultAdmin();
+
+const insertMemory = db.prepare('INSERT INTO memories (user_id, content, source_text, tags) VALUES (?, ?, ?, ?)');
+const getMemories = db.prepare('SELECT id, content, tags, created_at, updated_at FROM memories WHERE user_id = ? ORDER BY id DESC');
+const deleteMemory = db.prepare('DELETE FROM memories WHERE id = ? AND user_id = ?');
+const insertMessageLog = db.prepare('INSERT INTO message_log (user_id, provider, model, user_text, assistant_text) VALUES (?, ?, ?, ?, ?)');
+const getUserByUsername = db.prepare('SELECT id, username, password_hash, password_salt, role, settings_json, created_at FROM users WHERE lower(username) = lower(?)');
+const getUserById = db.prepare('SELECT id, username, role, settings_json, created_at FROM users WHERE id = ?');
+const listUsers = db.prepare('SELECT id, username, role, created_at, updated_at FROM users ORDER BY id ASC');
+const insertUser = db.prepare('INSERT INTO users (username, password_hash, password_salt, role, settings_json) VALUES (?, ?, ?, ?, ?)');
+const updateUserPassword = db.prepare('UPDATE users SET password_hash = ?, password_salt = ?, updated_at = datetime(\'now\') WHERE id = ?');
+const updateUserSettings = db.prepare('UPDATE users SET settings_json = ?, updated_at = datetime(\'now\') WHERE id = ?');
+const deleteUserById = db.prepare('DELETE FROM users WHERE id = ?');
+const sessions = new Map();
 
 let llmBusy = false;
 let cooldownUntil = 0;
@@ -80,7 +109,83 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, name: 'DeskBot backend', busy: llmBusy, cooldownMs: Math.max(0, cooldownUntil - Date.now()) });
 });
 
-app.get('/api/logs', (_req, res) => {
+app.post('/api/auth/login', (req, res) => {
+  const username = sanitizeText(req.body?.username || '', 80).trim();
+  const password = String(req.body?.password || '');
+  const row = username ? getUserByUsername.get(username) : null;
+  if (!row || !verifyPassword(password, row.password_salt, row.password_hash)) {
+    return res.status(401).json({ error: 'Invalid username or password.' });
+  }
+  const token = crypto.randomBytes(32).toString('hex');
+  sessions.set(token, row.id);
+  log('INFO', 'User logged in', { userId: row.id, username: row.username });
+  res.json({ token, user: publicUser(row), settings: parseSettings(row.settings_json) });
+});
+
+app.post('/api/auth/logout', requireAuth, (req, res) => {
+  sessions.delete(req.token);
+  res.json({ ok: true });
+});
+
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  res.json({ user: publicUser(req.user), settings: parseSettings(req.user.settings_json) });
+});
+
+app.put('/api/settings', requireAuth, (req, res) => {
+  const settings = req.body?.settings && typeof req.body.settings === 'object' ? req.body.settings : {};
+  const json = JSON.stringify(settings);
+  if (json.length > 20000) return res.status(400).json({ error: 'Settings are too large.' });
+  updateUserSettings.run(json, req.user.id);
+  res.json({ ok: true });
+});
+
+app.get('/api/users', requireAdmin, (_req, res) => {
+  res.json({ users: listUsers.all().map(publicUser) });
+});
+
+app.post('/api/users', requireAdmin, (req, res) => {
+  const username = sanitizeUsername(req.body?.username || '');
+  const password = String(req.body?.password || '');
+  if (!username) return res.status(400).json({ error: 'Username is required.' });
+  if (password.length < 1) return res.status(400).json({ error: 'Password is required.' });
+  if (getUserByUsername.get(username)) return res.status(409).json({ error: 'Username already exists.' });
+  const hashed = hashPassword(password);
+  const settings = JSON.stringify(req.body?.settings && typeof req.body.settings === 'object' ? req.body.settings : {});
+  const info = insertUser.run(username, hashed.hash, hashed.salt, 'user', settings);
+  log('INFO', 'User created', { userId: info.lastInsertRowid, username });
+  res.json({ ok: true, user: publicUser(getUserById.get(info.lastInsertRowid)) });
+});
+
+app.put('/api/users/:id', requireAdmin, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid user id.' });
+  const user = getUserById.get(id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+  const password = String(req.body?.password || '');
+  if (!password) return res.status(400).json({ error: 'Password is required.' });
+  const hashed = hashPassword(password);
+  updateUserPassword.run(hashed.hash, hashed.salt, id);
+  log('INFO', 'User password updated', { userId: id, username: user.username });
+  res.json({ ok: true });
+});
+
+app.delete('/api/users/:id', requireAdmin, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid user id.' });
+  const user = getUserById.get(id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+  if (user.username.toLowerCase() === config.defaultAdminUsername.toLowerCase()) {
+    return res.status(400).json({ error: 'The default admin user cannot be deleted.' });
+  }
+  deleteUserById.run(id);
+  for (const [token, userId] of sessions.entries()) {
+    if (userId === id) sessions.delete(token);
+  }
+  log('INFO', 'User deleted', { userId: id, username: user.username });
+  res.json({ ok: true });
+});
+
+app.get('/api/logs', requireAuth, (_req, res) => {
   try {
     const text = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8') : '';
     res.type('text/plain').send(text.split('\n').slice(-250).join('\n'));
@@ -89,28 +194,28 @@ app.get('/api/logs', (_req, res) => {
   }
 });
 
-app.get('/api/memories', (_req, res) => {
-  res.json({ memories: getMemories.all() });
+app.get('/api/memories', requireAuth, (req, res) => {
+  res.json({ memories: getMemories.all(req.user.id) });
 });
 
-app.post('/api/memories', (req, res) => {
+app.post('/api/memories', requireAuth, (req, res) => {
   const content = sanitizeText(req.body?.content || '', 2000).trim();
   const tags = sanitizeText(req.body?.tags || '', 200).trim();
   if (!content) return res.status(400).json({ error: 'Memory content is required.' });
-  const info = insertMemory.run(content, content, tags);
-  log('INFO', 'Memory saved manually', { id: info.lastInsertRowid });
+  const info = insertMemory.run(req.user.id, content, content, tags);
+  log('INFO', 'Memory saved manually', { id: info.lastInsertRowid, userId: req.user.id });
   res.json({ ok: true, id: info.lastInsertRowid });
 });
 
-app.delete('/api/memories/:id', (req, res) => {
+app.delete('/api/memories/:id', requireAuth, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid memory id.' });
-  deleteMemory.run(id);
-  log('INFO', 'Memory deleted', { id });
+  deleteMemory.run(id, req.user.id);
+  log('INFO', 'Memory deleted', { id, userId: req.user.id });
   res.json({ ok: true });
 });
 
-app.post('/api/tts/kokoro', async (req, res) => {
+app.post('/api/tts/kokoro', requireAuth, async (req, res) => {
   try {
     const text = sanitizeText(req.body?.text || '', 900).trim();
     const voice = sanitizeText(req.body?.voice || 'af_bella', 40).trim() || 'af_bella';
@@ -131,7 +236,7 @@ app.post('/api/tts/kokoro', async (req, res) => {
   }
 });
 
-app.post('/api/models', async (req, res) => {
+app.post('/api/models', requireAuth, async (req, res) => {
   const provider = String(req.body?.provider || 'ollama');
   const baseUrl = String(req.body?.baseUrl || '');
   try {
@@ -168,7 +273,7 @@ app.post('/api/models', async (req, res) => {
   }
 });
 
-app.post('/api/chat', async (req, res) => {
+app.post('/api/chat', requireAuth, async (req, res) => {
   const provider = String(req.body?.provider || 'ollama');
   const model = sanitizeText(req.body?.model || '', 120).trim();
   const baseUrl = String(req.body?.baseUrl || '');
@@ -326,8 +431,8 @@ app.post('/api/chat', async (req, res) => {
   const started = Date.now();
 
   try {
-    const savedMemory = maybeSaveMemory(userText);
-    const relevantMemories = findRelevantMemories(userText, 8);
+    const savedMemory = maybeSaveMemory(req.user.id, userText);
+    const relevantMemories = findRelevantMemories(req.user.id, userText, 8);
     const liveContext = await maybeBuildLiveContext(userText, clientGeo);
     const llmMessages = buildMessages(incomingMessages, userText, relevantMemories, savedMemory, liveContext);
 
@@ -375,7 +480,7 @@ app.post('/api/chat', async (req, res) => {
     }
 
     reply = cleanupReply(reply, incomingMessages, userText).trim() || 'I got an empty response from the model.';
-    insertMessageLog.run(provider, model, userText, reply);
+    insertMessageLog.run(req.user.id, provider, model, userText, reply);
     log('INFO', 'Chat request completed', { provider, model, totalMs: Date.now() - started, ...stats });
     res.json({ reply, savedMemory, memoriesUsed: relevantMemories, stats });
   } catch (err) {
@@ -595,7 +700,7 @@ function isSimpleAcknowledgement(text) {
   return /^(ok|okay|got it|thanks|thank you|cool|nice|sounds good|alright)[!.?\s]*$/i.test(String(text || '').trim());
 }
 
-function maybeSaveMemory(text) {
+function maybeSaveMemory(userId, text) {
   const normalized = text.replace(/\s+/g, ' ').trim();
   const patterns = [
     /^(?:please\s+)?remember(?: that)?\s+(.+)$/i,
@@ -617,8 +722,8 @@ function maybeSaveMemory(text) {
       }
       content = normalizeMemory(content);
       if (content.length >= 4) {
-        const info = insertMemory.run(content, normalized, 'auto');
-        log('INFO', 'Memory saved automatically', { id: info.lastInsertRowid, content });
+        const info = insertMemory.run(userId, content, normalized, 'auto');
+        log('INFO', 'Memory saved automatically', { id: info.lastInsertRowid, userId, content });
         return { id: info.lastInsertRowid, content };
       }
     }
@@ -633,8 +738,8 @@ function normalizeMemory(content) {
   return out;
 }
 
-function findRelevantMemories(query, limit = 8) {
-  const memories = getMemories.all();
+function findRelevantMemories(userId, query, limit = 8) {
+  const memories = getMemories.all(userId);
   if (!memories.length) return [];
   const terms = query.toLowerCase().split(/[^a-z0-9.:-]+/i).filter((w) => w.length >= 3).slice(0, 20);
   const identityQuery = /\b(who am i|my name|what(?:'s| is) my name|do you know me)\b/i.test(query);
@@ -1249,6 +1354,90 @@ function csvEnv(name, fallback) {
 
 function resolveFromRoot(p) {
   return path.isAbsolute(p) ? p : path.resolve(rootDir, p);
+}
+
+function ensureColumn(table, column, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((row) => row.name);
+  if (!columns.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
+function seedDefaultAdmin() {
+  const username = sanitizeUsername(config.defaultAdminUsername) || 'admin';
+  const existing = getUserByUsernameSafe(username);
+  let adminId = existing?.id;
+  if (!adminId) {
+    const hashed = hashPassword(config.defaultAdminPassword || 'admin');
+    const info = db.prepare('INSERT INTO users (username, password_hash, password_salt, role, settings_json) VALUES (?, ?, ?, ?, ?)')
+      .run(username, hashed.hash, hashed.salt, 'admin', '{}');
+    adminId = info.lastInsertRowid;
+    log('INFO', 'Default admin user created', { username });
+  }
+  db.prepare('UPDATE memories SET user_id = ? WHERE user_id IS NULL').run(adminId);
+  db.prepare('UPDATE message_log SET user_id = ? WHERE user_id IS NULL').run(adminId);
+}
+
+function getUserByUsernameSafe(username) {
+  return db.prepare('SELECT id FROM users WHERE lower(username) = lower(?)').get(username);
+}
+
+function sanitizeUsername(value) {
+  return String(value || '').trim().replace(/[^a-zA-Z0-9_.-]/g, '').slice(0, 40);
+}
+
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(String(password), salt, 64).toString('hex');
+  return { salt, hash };
+}
+
+function verifyPassword(password, salt, expectedHash) {
+  try {
+    const hash = crypto.scryptSync(String(password), salt, 64);
+    const expected = Buffer.from(String(expectedHash), 'hex');
+    return expected.length === hash.length && crypto.timingSafeEqual(hash, expected);
+  } catch {
+    return false;
+  }
+}
+
+function requireAuth(req, res, next) {
+  const header = String(req.get('authorization') || '');
+  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+  const userId = token ? sessions.get(token) : null;
+  if (!userId) return res.status(401).json({ error: 'Please log in.' });
+  const user = getUserById.get(userId);
+  if (!user) {
+    sessions.delete(token);
+    return res.status(401).json({ error: 'Please log in.' });
+  }
+  req.token = token;
+  req.user = user;
+  next();
+}
+
+function requireAdmin(req, res, next) {
+  requireAuth(req, res, () => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required.' });
+    next();
+  });
+}
+
+function publicUser(user) {
+  return {
+    id: user.id,
+    username: user.username,
+    role: user.role,
+    created_at: user.created_at
+  };
+}
+
+function parseSettings(json) {
+  try {
+    const parsed = JSON.parse(json || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
 }
 
 class DeskBotError extends Error {}
