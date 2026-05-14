@@ -96,6 +96,12 @@ export async function speakWithKokoro(text, { onStatus, voice }) {
   }
 }
 
+export async function preloadKokoroTts(onStatus) {
+  const notify = typeof onStatus === 'function' ? onStatus : () => {};
+  await loadKokoro(notify);
+  notify(`Kokoro TTS ready (${ttsDevice.toUpperCase()}).`);
+}
+
 export function primeKokoroAudio() {
   if (audioPrimed || typeof Audio === 'undefined') return;
   audioPrimed = true;

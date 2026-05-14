@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { Bot, Clock3, CloudSun, Mic, MicOff, Send, Settings, Trash2, RefreshCw, Volume2, VolumeX, Database, AlertTriangle, X } from 'lucide-react';
 import './styles.css';
 import { runStandaloneChat } from './standaloneLLM.js';
-import { primeKokoroAudio, speakWithKokoro, stopKokoroPlayback } from './localTTS.js';
+import { preloadKokoroTts, primeKokoroAudio, speakWithKokoro, stopKokoroPlayback } from './localTTS.js';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 const STORAGE_KEY = 'deskbot_minimal_safe_v1';
@@ -104,6 +104,24 @@ function App() {
     if (!['browser', 'kokoro'].includes(settings.ttsEngine)) {
       updateSettings({ ttsEngine: 'browser' });
     }
+  }, [settings.ttsEngine]);
+
+  useEffect(() => {
+    if (settings.ttsEngine !== 'kokoro') return;
+    let cancelled = false;
+    setError('');
+    preloadKokoroTts((status) => {
+      if (!cancelled) setModelStatus(status);
+    }).catch((err) => {
+      if (cancelled) return;
+      const message = err?.message || String(err);
+      setError(`Kokoro TTS error: ${message}`);
+      setModelStatus('Kokoro TTS failed to load.');
+      console.error('Kokoro preload failed', err);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [settings.ttsEngine]);
 
   useEffect(() => {
