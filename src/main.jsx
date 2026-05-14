@@ -487,7 +487,8 @@ function App() {
       }
     };
     recognition.onerror = (event) => {
-      if (ignoreRecognitionErrorRef.current) {
+      const code = String(event?.error || '');
+      if (ignoreRecognitionErrorRef.current || (settings.wakeEnabled && code === 'no-speech')) {
         ignoreRecognitionErrorRef.current = false;
         return;
       }
@@ -510,6 +511,14 @@ function App() {
           sendMessage(capturedQuery);
           return;
         }
+      }
+      if (settings.wakeEnabled && !capturedQuery) {
+        window.setTimeout(() => {
+          if (!busy && !speaking && !listening) {
+            toggleListening();
+          }
+        }, 120);
+        return;
       }
       if (!busy) setModelStatus('');
     };
