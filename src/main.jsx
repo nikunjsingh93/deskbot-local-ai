@@ -671,6 +671,29 @@ function App() {
     }
   }
 
+  async function updateUserName(id, username) {
+    setAdminStatus('');
+    try {
+      const response = await apiFetch(`/api/users/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Failed to update username.');
+      if (authRef.current?.user?.id === id && data.user) {
+        const nextAuth = { ...authRef.current, user: data.user };
+        authRef.current = nextAuth;
+        setAuth(nextAuth);
+        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(nextAuth));
+      }
+      setAdminStatus('Username updated.');
+      await refreshUsers();
+    } catch (err) {
+      setAdminStatus(err.message || String(err));
+    }
+  }
+
   async function deleteUser(id) {
     setAdminStatus('');
     try {
@@ -1130,6 +1153,7 @@ function App() {
           adminStatus={adminStatus}
           refreshUsers={refreshUsers}
           addUser={addUser}
+          updateUserName={updateUserName}
           updateUserPassword={updateUserPassword}
           deleteUser={deleteUser}
           logout={logout}
@@ -1142,8 +1166,8 @@ function App() {
 }
 
 function LoginScreen({ onLogin, error }) {
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('admin');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
 
   async function submit(e) {
@@ -1164,9 +1188,9 @@ function LoginScreen({ onLogin, error }) {
           </div>
         </div>
         <label>Username</label>
-        <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" />
+        <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" />
         <label>Password</label>
-        <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" autoComplete="current-password" />
+        <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" autoComplete="new-password" />
         {error && <div className="error-box login-error"><AlertTriangle size={16} /> {error}</div>}
         <button className="send-button login-button" type="submit" disabled={busy || !username.trim() || !password}>
           <KeyRound size={18} /> {busy ? 'Signing in...' : 'Sign in'}
@@ -1326,11 +1350,12 @@ function getBrowserGeo() {
   });
 }
 
-function SettingsPanel({ settings, updateSettings, close, fetchModels, models, allowedModels, modelStatus, memories, refreshMemories, addMemory, deleteMemory, logs, refreshLogs, currentUser, users, adminStatus, refreshUsers, addUser, updateUserPassword, deleteUser, logout, isFullscreen, toggleFullscreen }) {
+function SettingsPanel({ settings, updateSettings, close, fetchModels, models, allowedModels, modelStatus, memories, refreshMemories, addMemory, deleteMemory, logs, refreshLogs, currentUser, users, adminStatus, refreshUsers, addUser, updateUserName, updateUserPassword, deleteUser, logout, isFullscreen, toggleFullscreen }) {
   const [tab, setTab] = useState('model');
   const [newMemory, setNewMemory] = useState('');
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [usernameDrafts, setUsernameDrafts] = useState({});
   const [passwordDrafts, setPasswordDrafts] = useState({});
 
   return (
@@ -1553,6 +1578,13 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
                     <div className="muted small">Created {user.created_at}</div>
                   </div>
                   <input
+                    value={usernameDrafts[user.id] ?? user.username}
+                    onChange={(e) => setUsernameDrafts((prev) => ({ ...prev, [user.id]: e.target.value }))}
+                    placeholder="Username"
+                    autoComplete="off"
+                  />
+                  <button onClick={() => updateUserName(user.id, usernameDrafts[user.id] ?? user.username)}>Save name</button>
+                  <input
                     value={passwordDrafts[user.id] || ''}
                     onChange={(e) => setPasswordDrafts((prev) => ({ ...prev, [user.id]: e.target.value }))}
                     placeholder="New password"
@@ -1566,8 +1598,8 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
                   <button
                     className="icon-button"
                     onClick={() => deleteUser(user.id)}
-                    disabled={user.username === 'admin'}
-                    title={user.username === 'admin' ? 'The default admin user cannot be deleted' : 'Delete user'}
+                    disabled={user.role === 'admin'}
+                    title={user.role === 'admin' ? 'The admin user cannot be deleted' : 'Delete user'}
                   >
                     <Trash2 size={16} />
                   </button>

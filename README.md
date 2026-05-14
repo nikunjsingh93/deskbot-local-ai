@@ -63,7 +63,7 @@ Username: admin
 Password: admin
 ```
 
-You can change the default admin bootstrap values in `.env` with `DEFAULT_ADMIN_USERNAME` and `DEFAULT_ADMIN_PASSWORD`.
+You can change the default admin bootstrap values in `.env` with `DEFAULT_ADMIN_USERNAME` and `DEFAULT_ADMIN_PASSWORD`, or rename the admin user later from Settings → Admin.
 
 ## Standalone Mode (No Ollama / No LM Studio)
 

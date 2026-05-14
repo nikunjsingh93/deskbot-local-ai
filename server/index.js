@@ -95,6 +95,7 @@ const getUserByUsername = db.prepare('SELECT id, username, password_hash, passwo
 const getUserById = db.prepare('SELECT id, username, role, settings_json, created_at FROM users WHERE id = ?');
 const listUsers = db.prepare('SELECT id, username, role, created_at, updated_at FROM users ORDER BY id ASC');
 const insertUser = db.prepare('INSERT INTO users (username, password_hash, password_salt, role, settings_json) VALUES (?, ?, ?, ?, ?)');
+const updateUserUsername = db.prepare('UPDATE users SET username = ?, updated_at = datetime(\'now\') WHERE id = ?');
 const updateUserPassword = db.prepare('UPDATE users SET password_hash = ?, password_salt = ?, updated_at = datetime(\'now\') WHERE id = ?');
 const updateUserSettings = db.prepare('UPDATE users SET settings_json = ?, updated_at = datetime(\'now\') WHERE id = ?');
 const deleteUserById = db.prepare('DELETE FROM users WHERE id = ?');
@@ -171,12 +172,20 @@ app.put('/api/users/:id', requireAdmin, (req, res) => {
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid user id.' });
   const user = getUserById.get(id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
+  const username = req.body?.username == null ? '' : sanitizeUsername(req.body.username);
   const password = String(req.body?.password || '');
-  if (!password) return res.status(400).json({ error: 'Password is required.' });
-  const hashed = hashPassword(password);
-  updateUserPassword.run(hashed.hash, hashed.salt, id);
-  log('INFO', 'User password updated', { userId: id, username: user.username });
-  res.json({ ok: true });
+  if (!username && !password) return res.status(400).json({ error: 'Username or password is required.' });
+  if (username && username.toLowerCase() !== user.username.toLowerCase()) {
+    if (getUserByUsername.get(username)) return res.status(409).json({ error: 'Username already exists.' });
+    updateUserUsername.run(username, id);
+  }
+  if (password) {
+    const hashed = hashPassword(password);
+    updateUserPassword.run(hashed.hash, hashed.salt, id);
+  }
+  const updated = getUserById.get(id);
+  log('INFO', 'User updated', { userId: id, username: updated.username, passwordChanged: Boolean(password) });
+  res.json({ ok: true, user: publicUser(updated) });
 });
 
 app.delete('/api/users/:id', requireAdmin, (req, res) => {
@@ -184,8 +193,8 @@ app.delete('/api/users/:id', requireAdmin, (req, res) => {
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid user id.' });
   const user = getUserById.get(id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
-  if (user.username.toLowerCase() === config.defaultAdminUsername.toLowerCase()) {
-    return res.status(400).json({ error: 'The default admin user cannot be deleted.' });
+  if (user.role === 'admin') {
+    return res.status(400).json({ error: 'The admin user cannot be deleted.' });
   }
   deleteUserById.run(id);
   deleteSessionsForUser.run(id);
