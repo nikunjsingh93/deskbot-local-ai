@@ -11,6 +11,7 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..');
+const distDir = path.join(rootDir, 'dist');
 
 const config = {
   port: intEnv('PORT', 5175),
@@ -429,10 +430,19 @@ app.post('/api/ollama/panic-unload', async (req, res) => {
   }
 });
 
+if (fs.existsSync(distDir)) {
+  app.use(express.static(distDir));
+  app.use((req, res, next) => {
+    if (req.method !== 'GET' || req.path.startsWith('/api')) return next();
+    res.sendFile(path.join(distDir, 'index.html'));
+  });
+}
+
 app.listen(config.port, () => {
   log('INFO', `DeskBot backend listening on http://localhost:${config.port}`, {
     logFile,
-    allowedHosts: config.allowedHosts
+    allowedHosts: config.allowedHosts,
+    servingFrontend: fs.existsSync(distDir)
   });
 });
 
