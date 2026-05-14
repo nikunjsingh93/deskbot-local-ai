@@ -8,6 +8,7 @@ import { preloadKokoroTts, primeKokoroAudio, speakWithKokoro, stopKokoroPlayback
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 const STORAGE_KEY = 'deskbot_minimal_safe_v1';
 const LEGACY_SETTINGS_KEY = 'deskbot_settings_v1';
+const AUTH_STORAGE_KEY = 'deskbot_auth_v1';
 const DEFAULT_STANDALONE_MODEL = 'onnx-community/SmolLM2-360M-Instruct-ONNX';
 const FOLLOWUP_WINDOW_MS = 5000;
 const WAKE_SILENCE_SEND_MS = 1200;
@@ -100,6 +101,7 @@ const defaultSettings = {
 
 function App() {
   const [auth, setAuth] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [settings, setSettings] = useState(defaultSettings);
   const [messages, setMessages] = useState([
@@ -165,6 +167,7 @@ function App() {
 
   useEffect(() => {
     fetch(`${API_BASE}/api/health`).catch(() => {});
+    restoreAuth();
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch((err) => {
         console.warn('Service worker registration failed', err);
@@ -360,6 +363,38 @@ function App() {
     return fetch(`${API_BASE}${path}`, { ...options, headers });
   }
 
+  function applyAuthSession(nextAuth, nextSettings) {
+    authRef.current = nextAuth;
+    setAuth(nextAuth);
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(nextAuth));
+    const mergedSettings = { ...defaultSettings, ...(nextSettings || {}) };
+    settingsRef.current = mergedSettings;
+    setSettings(mergedSettings);
+    const savedMessages = readUserMessages(nextAuth.user.id);
+    messagesRef.current = savedMessages;
+    setMessages(savedMessages);
+    setError('');
+  }
+
+  async function restoreAuth() {
+    try {
+      const stored = localStorage.getItem(AUTH_STORAGE_KEY);
+      const parsed = stored ? JSON.parse(stored) : null;
+      if (!parsed?.token) return;
+      authRef.current = { token: parsed.token, user: parsed.user };
+      const response = await apiFetch('/api/auth/me');
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Session expired.');
+      applyAuthSession({ token: parsed.token, user: data.user }, data.settings);
+    } catch {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      authRef.current = null;
+      setAuth(null);
+    } finally {
+      setAuthChecked(true);
+    }
+  }
+
   async function login(username, password) {
     setLoginError('');
     try {
@@ -370,16 +405,7 @@ function App() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Login failed.');
-      const nextAuth = { token: data.token, user: data.user };
-      authRef.current = nextAuth;
-      setAuth(nextAuth);
-      const nextSettings = { ...defaultSettings, ...(data.settings || {}) };
-      settingsRef.current = nextSettings;
-      setSettings(nextSettings);
-      const savedMessages = readUserMessages(data.user.id);
-      messagesRef.current = savedMessages;
-      setMessages(savedMessages);
-      setError('');
+      applyAuthSession({ token: data.token, user: data.user }, data.settings);
     } catch (err) {
       setLoginError(err.message || String(err));
     }
@@ -387,6 +413,7 @@ function App() {
 
   async function logout() {
     await apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+    localStorage.removeItem(AUTH_STORAGE_KEY);
     authRef.current = null;
     setAuth(null);
     setSettings(defaultSettings);
@@ -928,6 +955,22 @@ function App() {
       {listening ? <MicOff /> : <Mic />}
     </button>
   );
+
+  if (!authChecked) {
+    return (
+      <div className="login-shell">
+        <div className="login-card">
+          <div className="login-brand">
+            <img src="/icons/icon-192.png" alt="" />
+            <div>
+              <h1>Deskbot Local AI</h1>
+              <p className="muted">Checking session...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!auth) {
     return <LoginScreen onLogin={login} error={loginError} />;

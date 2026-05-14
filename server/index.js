@@ -74,6 +74,13 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS auth_sessions (
+  token TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 `);
 
 ensureColumn('memories', 'user_id', 'INTEGER');
@@ -91,7 +98,10 @@ const insertUser = db.prepare('INSERT INTO users (username, password_hash, passw
 const updateUserPassword = db.prepare('UPDATE users SET password_hash = ?, password_salt = ?, updated_at = datetime(\'now\') WHERE id = ?');
 const updateUserSettings = db.prepare('UPDATE users SET settings_json = ?, updated_at = datetime(\'now\') WHERE id = ?');
 const deleteUserById = db.prepare('DELETE FROM users WHERE id = ?');
-const sessions = new Map();
+const insertSession = db.prepare('INSERT INTO auth_sessions (token, user_id, expires_at) VALUES (?, ?, ?)');
+const getSession = db.prepare('SELECT token, user_id, expires_at FROM auth_sessions WHERE token = ?');
+const deleteSession = db.prepare('DELETE FROM auth_sessions WHERE token = ?');
+const deleteSessionsForUser = db.prepare('DELETE FROM auth_sessions WHERE user_id = ?');
 
 let llmBusy = false;
 let cooldownUntil = 0;
@@ -117,13 +127,13 @@ app.post('/api/auth/login', (req, res) => {
     return res.status(401).json({ error: 'Invalid username or password.' });
   }
   const token = crypto.randomBytes(32).toString('hex');
-  sessions.set(token, row.id);
+  insertSession.run(token, row.id, null);
   log('INFO', 'User logged in', { userId: row.id, username: row.username });
   res.json({ token, user: publicUser(row), settings: parseSettings(row.settings_json) });
 });
 
 app.post('/api/auth/logout', requireAuth, (req, res) => {
-  sessions.delete(req.token);
+  deleteSession.run(req.token);
   res.json({ ok: true });
 });
 
@@ -178,9 +188,7 @@ app.delete('/api/users/:id', requireAdmin, (req, res) => {
     return res.status(400).json({ error: 'The default admin user cannot be deleted.' });
   }
   deleteUserById.run(id);
-  for (const [token, userId] of sessions.entries()) {
-    if (userId === id) sessions.delete(token);
-  }
+  deleteSessionsForUser.run(id);
   log('INFO', 'User deleted', { userId: id, username: user.username });
   res.json({ ok: true });
 });
@@ -1403,11 +1411,15 @@ function verifyPassword(password, salt, expectedHash) {
 function requireAuth(req, res, next) {
   const header = String(req.get('authorization') || '');
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
-  const userId = token ? sessions.get(token) : null;
-  if (!userId) return res.status(401).json({ error: 'Please log in.' });
-  const user = getUserById.get(userId);
+  const session = token ? getSession.get(token) : null;
+  if (!session) return res.status(401).json({ error: 'Please log in.' });
+  if (session.expires_at && new Date(session.expires_at).getTime() <= Date.now()) {
+    deleteSession.run(token);
+    return res.status(401).json({ error: 'Session expired. Please log in again.' });
+  }
+  const user = getUserById.get(session.user_id);
   if (!user) {
-    sessions.delete(token);
+    deleteSession.run(token);
     return res.status(401).json({ error: 'Please log in.' });
   }
   req.token = token;
