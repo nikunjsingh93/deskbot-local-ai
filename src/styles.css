@@ -351,6 +351,21 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
   }
 }
 
+@media (max-width: 768px) {
+  .theme-clock-big .clock-corner,
+  .theme-clock-weather-big .clock-corner {
+    font-size: 17px;
+  }
+  .theme-clock-big .clock-corner-date,
+  .theme-clock-weather-big .clock-corner-date {
+    font-size: 18px;
+  }
+  .theme-clock-weather-big .clock-corner-weather-details {
+    font-size: 13px;
+    max-width: 50vw;
+  }
+}
+
 @media (max-height: 620px) {
   .main-panel { padding-top: 10px; }
   .robot-face { transform: scale(0.68); height: 220px; }
