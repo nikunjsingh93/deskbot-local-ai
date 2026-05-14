@@ -91,7 +91,7 @@ Backend:
 http://localhost:5175
 ```
 
-## Connect to Ubuntu Ollama
+## Connect to Ollama
 
 In Settings:
 
