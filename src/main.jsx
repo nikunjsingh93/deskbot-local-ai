@@ -227,7 +227,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if ((settings.uiTheme || 'bot-chat') !== 'clock-weather') return;
+    if (!['clock-weather', 'clock-weather-big'].includes(settings.uiTheme || 'bot-chat')) return;
     refreshDashboardWeather();
     const timer = window.setInterval(refreshDashboardWeather, 60 * 60 * 1000);
     return () => window.clearInterval(timer);
@@ -751,6 +751,10 @@ function App() {
   const allowedModels = useMemo(() => models, [models]);
   const uiTheme = settings.uiTheme || 'bot-chat';
   const isChatTheme = uiTheme === 'bot-chat';
+  const isClockTheme = ['clock', 'clock-big', 'clock-weather', 'clock-weather-big'].includes(uiTheme);
+  const isWeatherTheme = ['clock-weather', 'clock-weather-big'].includes(uiTheme);
+  const isBigClockTheme = ['clock-big', 'clock-weather-big'].includes(uiTheme);
+  const clockDate = now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
   const voiceButton = !settings.wakeEnabled && (
     <button type="button" className={`round-button ${listening ? 'active' : ''}`} onClick={toggleListening} disabled={busy} title="Voice input">
       {listening ? <MicOff /> : <Mic />}
@@ -762,29 +766,38 @@ function App() {
       <button className="floating-settings icon-button" onClick={() => setSettingsOpen(true)} title="Settings"><Settings /></button>
 
       <main className={`main-panel theme-${uiTheme}`}>
-        {uiTheme === 'clock' || uiTheme === 'clock-weather' ? (
+        {isClockTheme ? (
           <section className="clock-stage">
-            <div className="clock-time">{now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>
-            <div className="clock-date">{now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}</div>
-            {uiTheme === 'clock-weather' && (
-              <div className="weather-panel">
-                {dashboardWeather.status === 'ready' && dashboardWeather.data ? (
-                  <>
-                    <div className="weather-main">
-                      <CloudSun size={24} />
-                      <span>{dashboardWeather.data.temperature}°</span>
-                      <strong>{dashboardWeather.data.condition}</strong>
-                    </div>
-                    <div className="weather-details">
-                      Feels {dashboardWeather.data.feelsLike}° · High {dashboardWeather.data.high}° / Low {dashboardWeather.data.low}° · Wind {dashboardWeather.data.wind} km/h
-                    </div>
-                  </>
-                ) : dashboardWeather.status === 'loading' ? (
-                  <div className="weather-main"><CloudSun size={24} /><strong>Loading weather...</strong></div>
-                ) : (
-                  <div className="weather-main"><CloudSun size={24} /><strong>Weather unavailable</strong></div>
+            {isBigClockTheme && (
+              <div className="clock-corners">
+                <div className="clock-corner clock-corner-date">{clockDate}</div>
+                {isWeatherTheme && (
+                  <div className="clock-corner clock-corner-weather">
+                    {dashboardWeather.status === 'ready' && dashboardWeather.data ? (
+                      <>
+                        <CloudSun size={22} />
+                        <span>{dashboardWeather.data.temperature}°</span>
+                        <strong>{dashboardWeather.data.condition}</strong>
+                      </>
+                    ) : dashboardWeather.status === 'loading' ? (
+                      <>
+                        <CloudSun size={22} />
+                        <strong>Loading weather...</strong>
+                      </>
+                    ) : (
+                      <>
+                        <CloudSun size={22} />
+                        <strong>Weather unavailable</strong>
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
+            )}
+            <div className="clock-time">{now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>
+            {!isBigClockTheme && <div className="clock-date">{clockDate}</div>}
+            {isWeatherTheme && !isBigClockTheme && (
+              <WeatherPanel dashboardWeather={dashboardWeather} />
             )}
             <div className="robot-status">
               {busy ? 'Thinking...' : listening ? 'Listening...' : 'Ready'}
@@ -878,6 +891,29 @@ function App() {
           isFullscreen={isFullscreen}
           toggleFullscreen={toggleFullscreen}
         />
+      )}
+    </div>
+  );
+}
+
+function WeatherPanel({ dashboardWeather }) {
+  return (
+    <div className="weather-panel">
+      {dashboardWeather.status === 'ready' && dashboardWeather.data ? (
+        <>
+          <div className="weather-main">
+            <CloudSun size={24} />
+            <span>{dashboardWeather.data.temperature}°</span>
+            <strong>{dashboardWeather.data.condition}</strong>
+          </div>
+          <div className="weather-details">
+            Feels {dashboardWeather.data.feelsLike}° · High {dashboardWeather.data.high}° / Low {dashboardWeather.data.low}° · Wind {dashboardWeather.data.wind} km/h
+          </div>
+        </>
+      ) : dashboardWeather.status === 'loading' ? (
+        <div className="weather-main"><CloudSun size={24} /><strong>Loading weather...</strong></div>
+      ) : (
+        <div className="weather-main"><CloudSun size={24} /><strong>Weather unavailable</strong></div>
       )}
     </div>
   );
@@ -1137,11 +1173,25 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
                 <span>Clock</span>
               </button>
               <button
+                className={`theme-option ${settings.uiTheme === 'clock-big' ? 'active' : ''}`}
+                onClick={() => updateSettings({ uiTheme: 'clock-big' })}
+              >
+                <Clock3 size={18} />
+                <span>Big Clock</span>
+              </button>
+              <button
                 className={`theme-option ${settings.uiTheme === 'clock-weather' ? 'active' : ''}`}
                 onClick={() => updateSettings({ uiTheme: 'clock-weather' })}
               >
                 <CloudSun size={18} />
                 <span>Clock + Weather</span>
+              </button>
+              <button
+                className={`theme-option ${settings.uiTheme === 'clock-weather-big' ? 'active' : ''}`}
+                onClick={() => updateSettings({ uiTheme: 'clock-weather-big' })}
+              >
+                <CloudSun size={18} />
+                <span>Big Clock + Weather</span>
               </button>
             </div>
           </div>

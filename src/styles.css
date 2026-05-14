@@ -90,7 +90,7 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
   border-color: rgba(94,230,255,0.42);
 }
 .main-panel { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(300px, 420px) minmax(0, 1fr); gap: 20px; padding: 22px; max-width: 1300px; width: 100%; margin: 0 auto; overflow: hidden; }
-.main-panel.theme-bot-only, .main-panel.theme-clock, .main-panel.theme-clock-weather { grid-template-columns: 1fr; max-width: none; }
+.main-panel.theme-bot-only, .main-panel.theme-clock, .main-panel.theme-clock-big, .main-panel.theme-clock-weather, .main-panel.theme-clock-weather-big { grid-template-columns: 1fr; max-width: none; }
 .robot-stage, .chat-panel {
   border: 1px solid var(--line);
   border-radius: 28px;
@@ -141,7 +141,9 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
   position: relative;
 }
 .theme-clock .clock-stage,
-.theme-clock-weather .clock-stage {
+.theme-clock-big .clock-stage,
+.theme-clock-weather .clock-stage,
+.theme-clock-weather-big .clock-stage {
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -149,6 +151,52 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
 }
 .clock-stage::before { content: ''; position: absolute; inset: 18%; border: 1px solid rgba(94,230,255,0.14); border-radius: 50%; transform: rotate(-8deg); }
 .clock-time { z-index: 1; font-size: clamp(72px, 14vw, 168px); font-weight: 800; line-height: 0.9; color: var(--text); font-variant-numeric: tabular-nums; }
+.theme-clock-big .clock-stage,
+.theme-clock-weather-big .clock-stage {
+  padding: clamp(16px, 4vw, 42px);
+}
+.theme-clock-big .clock-stage::before,
+.theme-clock-weather-big .clock-stage::before {
+  inset: 12%;
+}
+.theme-clock-big .clock-time,
+.theme-clock-weather-big .clock-time {
+  font-size: clamp(118px, 24vw, 330px);
+  line-height: 0.82;
+  letter-spacing: 0;
+}
+.clock-corners {
+  position: absolute;
+  top: max(16px, env(safe-area-inset-top));
+  left: max(16px, env(safe-area-inset-left));
+  right: max(16px, env(safe-area-inset-right));
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  pointer-events: none;
+}
+.clock-corner {
+  max-width: min(42vw, 420px);
+  color: var(--muted);
+  font-size: clamp(15px, 2.2vw, 26px);
+  font-weight: 800;
+  line-height: 1.15;
+}
+.clock-corner-weather {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  color: var(--text);
+  text-align: right;
+}
+.clock-corner-weather span {
+  font-size: clamp(24px, 4vw, 48px);
+  line-height: 0.9;
+  font-variant-numeric: tabular-nums;
+}
 .clock-date { z-index: 1; margin-top: 20px; color: var(--muted); font-size: 18px; font-weight: 700; }
 .weather-panel { z-index: 1; margin-top: 22px; display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--text); }
 .weather-main { display: flex; align-items: center; gap: 10px; font-size: 18px; }
@@ -157,13 +205,20 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
 .stage-actions { z-index: 1; min-height: 54px; margin-top: 22px; display: flex; align-items: center; justify-content: center; gap: 10px; }
 .theme-bot-only .stage-actions .round-button,
 .theme-clock .stage-actions .round-button,
+.theme-clock-big .stage-actions .round-button,
 .theme-clock-weather .stage-actions .round-button {
+  width: 72px;
+  height: 72px;
+}
+.theme-clock-weather-big .stage-actions .round-button {
   width: 72px;
   height: 72px;
 }
 .theme-bot-only .stage-actions .round-button svg,
 .theme-clock .stage-actions .round-button svg,
-.theme-clock-weather .stage-actions .round-button svg {
+.theme-clock-big .stage-actions .round-button svg,
+.theme-clock-weather .stage-actions .round-button svg,
+.theme-clock-weather-big .stage-actions .round-button svg {
   width: 32px;
   height: 32px;
 }
@@ -199,7 +254,7 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
 .settings-section { overflow: auto; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
 .settings-section label { color: var(--muted); font-size: 13px; font-weight: 700; }
 .row-buttons, .memory-add { display: flex; gap: 10px; flex-wrap: wrap; }
-.theme-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.theme-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .theme-option { min-height: 68px; display: flex; align-items: center; justify-content: center; gap: 8px; }
 .theme-option.active { background: rgba(94,230,255,0.16); border-color: rgba(94,230,255,0.55); color: var(--accent); }
 .danger-light { border-color: rgba(255,119,138,0.35); background: rgba(255,119,138,0.10); }
@@ -219,7 +274,7 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
   .floating-settings { top: max(8px, env(safe-area-inset-top)); right: max(8px, env(safe-area-inset-right)); }
   .main-panel { grid-template-columns: 1fr; grid-auto-rows: minmax(0, auto); padding: 12px; overflow: visible; min-height: 100%; }
   .robot-stage { min-height: 330px; }
-  .main-panel.theme-bot-only, .main-panel.theme-clock, .main-panel.theme-clock-weather { max-width: 100%; }
+  .main-panel.theme-bot-only, .main-panel.theme-clock, .main-panel.theme-clock-big, .main-panel.theme-clock-weather, .main-panel.theme-clock-weather-big { max-width: 100%; }
   .theme-bot-only .robot-face { transform: scale(0.85); margin-bottom: 6px; }
   .clock-time { font-size: clamp(58px, 20vw, 112px); }
   .chat-panel { min-height: 0; }
@@ -247,7 +302,24 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
   .send-button { min-height: 48px; }
   .clock-stage { padding: 12px; justify-content: center; }
   .clock-time { font-size: clamp(46px, 18vw, 92px); }
+  .theme-clock-big .clock-time,
+  .theme-clock-weather-big .clock-time {
+    font-size: clamp(86px, 30vw, 178px);
+  }
   .clock-date { margin-top: 12px; font-size: 15px; text-align: center; }
+  .clock-corners {
+    top: max(10px, env(safe-area-inset-top));
+    left: max(10px, env(safe-area-inset-left));
+    right: max(10px, env(safe-area-inset-right));
+  }
+  .clock-corner {
+    max-width: 45vw;
+    font-size: 13px;
+  }
+  .clock-corner-weather { gap: 5px; }
+  .clock-corner-weather svg { width: 16px; height: 16px; }
+  .clock-corner-weather span { font-size: 24px; }
+  .clock-corner-weather strong { max-width: 24vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .weather-panel { margin-top: 14px; }
   .weather-main { font-size: 15px; flex-wrap: wrap; justify-content: center; text-align: center; }
   .weather-main span { font-size: 30px; }
@@ -256,7 +328,9 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
   .stage-actions { margin-top: 10px; }
   .theme-bot-only .stage-actions .round-button,
   .theme-clock .stage-actions .round-button,
-  .theme-clock-weather .stage-actions .round-button {
+  .theme-clock-big .stage-actions .round-button,
+  .theme-clock-weather .stage-actions .round-button,
+  .theme-clock-weather-big .stage-actions .round-button {
     width: 64px;
     height: 64px;
   }
@@ -268,7 +342,29 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
   .theme-bot-only .robot-face { transform: scale(0.74); margin-bottom: 0; }
   .robot-status { margin-top: 8px; }
   .clock-time { font-size: clamp(44px, 16vh, 86px); }
+  .theme-clock-big .clock-stage,
+  .theme-clock-weather-big .clock-stage {
+    padding: 8px 12px;
+  }
+  .theme-clock-big .clock-time,
+  .theme-clock-weather-big .clock-time {
+    font-size: clamp(96px, 36vh, 188px);
+  }
   .clock-date { margin-top: 10px; }
   .weather-panel { margin-top: 10px; gap: 4px; }
+  .theme-clock-big .robot-status,
+  .theme-clock-big .model-status-live,
+  .theme-clock-weather-big .robot-status,
+  .theme-clock-weather-big .model-status-live {
+    position: absolute;
+    bottom: 76px;
+    margin-top: 0;
+  }
+  .theme-clock-big .stage-actions,
+  .theme-clock-weather-big .stage-actions {
+    position: absolute;
+    bottom: 10px;
+    margin-top: 0;
+  }
   .stage-actions { margin-top: 8px; }
 }
