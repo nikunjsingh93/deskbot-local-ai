@@ -96,7 +96,7 @@ Environment="OLLAMA_HOST=0.0.0.0:11434"
 Environment="OLLAMA_MAX_LOADED_MODELS=1"
 Environment="OLLAMA_NUM_PARALLEL=1"
 Environment="OLLAMA_MAX_QUEUE=1"
-Environment="OLLAMA_KEEP_ALIVE=0"
+Environment="OLLAMA_KEEP_ALIVE=1m"
 Environment="OLLAMA_CONTEXT_LENGTH=1024"
 Environment="OLLAMA_LLM_LIBRARY=cpu_avx2"
 ```
