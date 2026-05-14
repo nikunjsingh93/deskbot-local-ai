@@ -2,6 +2,20 @@
 
 A minimal React + Vite + Node + SQLite starter for a cute desktop robot assistant.
 
+## Screenshots
+
+![DeskBot bot and chat mode](docs/screenshots/1.png)
+
+![DeskBot big clock and weather mode](docs/screenshots/2.png)
+
+![DeskBot memory settings](docs/screenshots/3.png)
+
+![DeskBot theme settings](docs/screenshots/4.png)
+
+![DeskBot model settings](docs/screenshots/5.png)
+
+![DeskBot bot only mode](docs/screenshots/6.png)
+
 ## Included
 
 - React + Vite web app
