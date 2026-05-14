@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Bot, Mic, MicOff, Send, Settings, Trash2, RefreshCw, Volume2, VolumeX, Database, AlertTriangle, X } from 'lucide-react';
+import { Bot, Clock3, Mic, MicOff, Send, Settings, Trash2, RefreshCw, Volume2, VolumeX, Database, AlertTriangle, X } from 'lucide-react';
 import './styles.css';
 import { runStandaloneChat } from './standaloneLLM.js';
 import { speakWithKokoro, stopKokoroPlayback } from './localTTS.js';
@@ -23,7 +23,8 @@ const defaultSettings = {
   ttsEngine: 'browser',
   kokoroVoice: 'af_bella',
   wakeEnabled: false,
-  wakeWord: 'robot'
+  wakeWord: 'robot',
+  uiTheme: 'bot-chat'
 };
 
 function App() {
@@ -43,6 +44,7 @@ function App() {
   const [logs, setLogs] = useState('');
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  const [now, setNow] = useState(() => new Date());
   const chatEndRef = useRef(null);
   const recognitionRef = useRef(null);
   const manualStopRef = useRef(false);
@@ -93,6 +95,17 @@ function App() {
       updateSettings({ wakeWord: 'robot' });
     }
   }, [settings.wakeWord]);
+
+  useEffect(() => {
+    if (!settings.uiTheme) {
+      updateSettings({ uiTheme: 'bot-chat' });
+    }
+  }, [settings.uiTheme]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const wasEnabled = wakeEnabledPrevRef.current;
@@ -505,6 +518,13 @@ function App() {
   }
 
   const allowedModels = useMemo(() => models, [models]);
+  const uiTheme = settings.uiTheme || 'bot-chat';
+  const isChatTheme = uiTheme === 'bot-chat';
+  const voiceButton = !settings.wakeEnabled && (
+    <button type="button" className={`round-button ${listening ? 'active' : ''}`} onClick={toggleListening} disabled={busy} title="Voice input">
+      {listening ? <MicOff /> : <Mic />}
+    </button>
+  );
 
   return (
     <div className="app-shell">
@@ -513,70 +533,83 @@ function App() {
         <button className="icon-button" onClick={() => setSettingsOpen(true)} title="Settings"><Settings /></button>
       </header>
 
-      <main className="main-panel">
-        <section className="robot-stage">
-          <RobotFace mood={mood} />
-          <div className="robot-status">
-            {busy ? 'Thinking...' : listening ? 'Listening...' : 'Ready'}
-          </div>
-          <div className="model-line">
-            {settings.provider === 'ollama' ? 'Ollama' : settings.provider === 'openai' ? 'LM Studio/OpenAI' : 'Standalone (WebGPU)'} · {activeModel || 'no model selected'}
-          </div>
-          {(busy || modelStatus) && <div className="model-status-live">{modelStatus || 'Working...'}</div>}
-        </section>
+      <main className={`main-panel theme-${uiTheme}`}>
+        {uiTheme === 'clock' ? (
+          <section className="clock-stage">
+            <div className="clock-time">{now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>
+            <div className="clock-date">{now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}</div>
+            <div className="robot-status">
+              {busy ? 'Thinking...' : listening ? 'Listening...' : 'Ready'}
+            </div>
+            {(busy || modelStatus) && <div className="model-status-live">{modelStatus || 'Working...'}</div>}
+            {error && <div className="stage-error"><AlertTriangle size={16} /> {error}</div>}
+            <div className="stage-actions">{voiceButton}</div>
+          </section>
+        ) : (
+          <section className="robot-stage">
+            <RobotFace mood={mood} />
+            <div className="robot-status">
+              {busy ? 'Thinking...' : listening ? 'Listening...' : 'Ready'}
+            </div>
+            <div className="model-line">
+              {settings.provider === 'ollama' ? 'Ollama' : settings.provider === 'openai' ? 'LM Studio/OpenAI' : 'Standalone (WebGPU)'} · {activeModel || 'no model selected'}
+            </div>
+            {(busy || modelStatus) && <div className="model-status-live">{modelStatus || 'Working...'}</div>}
+            {!isChatTheme && error && <div className="stage-error"><AlertTriangle size={16} /> {error}</div>}
+            {!isChatTheme && <div className="stage-actions">{voiceButton}</div>}
+          </section>
+        )}
 
-        <section className="chat-panel">
-          <div className="chat-scroll">
-            {messages.map((message, idx) => (
-              <div key={idx} className={`message ${message.role}`}>
-                <div className="bubble">
-                  {message.content}
-                  {message.savedMemory && <div className="memory-note">Memory saved: {message.savedMemory.content}</div>}
+        {isChatTheme && (
+          <section className="chat-panel">
+            <div className="chat-scroll">
+              {messages.map((message, idx) => (
+                <div key={idx} className={`message ${message.role}`}>
+                  <div className="bubble">
+                    {message.content}
+                    {message.savedMemory && <div className="memory-note">Memory saved: {message.savedMemory.content}</div>}
+                  </div>
                 </div>
-              </div>
-            ))}
-            {busy && <div className="message assistant"><div className="bubble typing">Thinking<span>.</span><span>.</span><span>.</span></div></div>}
-            {listening && (!settings.wakeEnabled || wakeArmed) && (
-              <div className="message assistant listen-inline">
-                <div className="bubble listening-chip">
-                  {settings.wakeEnabled
-                    ? (wakeArmed ? 'Listening... ask now.' : `Listening for "${assistantName}"...`)
-                    : 'Listening...'}
+              ))}
+              {busy && <div className="message assistant"><div className="bubble typing">Thinking<span>.</span><span>.</span><span>.</span></div></div>}
+              {listening && (!settings.wakeEnabled || wakeArmed) && (
+                <div className="message assistant listen-inline">
+                  <div className="bubble listening-chip">
+                    {settings.wakeEnabled
+                      ? (wakeArmed ? 'Listening... ask now.' : `Listening for "${assistantName}"...`)
+                      : 'Listening...'}
+                  </div>
                 </div>
-              </div>
-            )}
-            <div ref={chatEndRef} />
-          </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
 
-          {error && <div className="error-box"><AlertTriangle size={16} /> {error}</div>}
+            {error && <div className="error-box"><AlertTriangle size={16} /> {error}</div>}
 
-          <form className={`composer ${settings.wakeEnabled ? 'wake-enabled' : ''}`} onSubmit={(e) => { e.preventDefault(); sendMessage(); }}>
-            {!settings.wakeEnabled && (
-              <button type="button" className={`round-button ${listening ? 'active' : ''}`} onClick={toggleListening} disabled={busy} title="Voice input">
-                {listening ? <MicOff /> : <Mic />}
+            <form className={`composer ${settings.wakeEnabled ? 'wake-enabled' : ''}`} onSubmit={(e) => { e.preventDefault(); sendMessage(); }}>
+              {!settings.wakeEnabled && voiceButton}
+              <button
+                type="button"
+                className={`round-button ${settings.ttsEnabled ? '' : 'active'}`}
+                onClick={() => {
+                  const nextEnabled = !settings.ttsEnabled;
+                  updateSettings({ ttsEnabled: nextEnabled });
+                  if (!nextEnabled) {
+                    window.speechSynthesis.cancel();
+                    stopKokoroPlayback();
+                    setModelStatus('');
+                  }
+                }}
+                disabled={busy}
+                title={settings.ttsEnabled ? 'Mute voice replies' : 'Unmute voice replies'}
+              >
+                {settings.ttsEnabled ? <Volume2 /> : <VolumeX />}
               </button>
-            )}
-            <button
-              type="button"
-              className={`round-button ${settings.ttsEnabled ? '' : 'active'}`}
-              onClick={() => {
-                const nextEnabled = !settings.ttsEnabled;
-                updateSettings({ ttsEnabled: nextEnabled });
-                if (!nextEnabled) {
-                  window.speechSynthesis.cancel();
-                  stopKokoroPlayback();
-                  setModelStatus('');
-                }
-              }}
-              disabled={busy}
-              title={settings.ttsEnabled ? 'Mute voice replies' : 'Unmute voice replies'}
-            >
-              {settings.ttsEnabled ? <Volume2 /> : <VolumeX />}
-            </button>
-            <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask DeskBot, or say: Remember that I prefer simple Docker setups..." disabled={busy} />
-            <button type="submit" className="send-button" disabled={busy || !input.trim()}><Send size={18} /> Send</button>
-          </form>
-        </section>
+              <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask DeskBot, or say: Remember that I prefer simple Docker setups..." disabled={busy} />
+              <button type="submit" className="send-button" disabled={busy || !input.trim()}><Send size={18} /> Send</button>
+            </form>
+          </section>
+        )}
       </main>
 
       {settingsOpen && (
@@ -712,6 +745,7 @@ function SettingsPanel({ settings, updateSettings, clearChatHistory, close, fetc
         </div>
         <div className="tabs">
           <button className={tab === 'model' ? 'active' : ''} onClick={() => setTab('model')}>Model</button>
+          <button className={tab === 'themes' ? 'active' : ''} onClick={() => setTab('themes')}>Themes</button>
           <button className={tab === 'memory' ? 'active' : ''} onClick={() => { setTab('memory'); refreshMemories(); }}><Database size={16} /> Memory</button>
           <button className={tab === 'diagnostics' ? 'active' : ''} onClick={() => setTab('diagnostics')}>Diagnostics</button>
           <button className={tab === 'about' ? 'active' : ''} onClick={() => setTab('about')}>About</button>
@@ -804,6 +838,34 @@ function SettingsPanel({ settings, updateSettings, clearChatHistory, close, fetc
               placeholder="robot"
             />
             <p className="muted small">Wake is off by default. Turn it on, then say the wake word and your question, for example: "robot what is the weather?".</p>
+          </div>
+        )}
+
+        {tab === 'themes' && (
+          <div className="settings-section">
+            <div className="theme-list">
+              <button
+                className={`theme-option ${settings.uiTheme === 'bot-chat' || !settings.uiTheme ? 'active' : ''}`}
+                onClick={() => updateSettings({ uiTheme: 'bot-chat' })}
+              >
+                <Bot size={18} />
+                <span>Bot + Chat</span>
+              </button>
+              <button
+                className={`theme-option ${settings.uiTheme === 'bot-only' ? 'active' : ''}`}
+                onClick={() => updateSettings({ uiTheme: 'bot-only' })}
+              >
+                <Bot size={18} />
+                <span>Bot Only</span>
+              </button>
+              <button
+                className={`theme-option ${settings.uiTheme === 'clock' ? 'active' : ''}`}
+                onClick={() => updateSettings({ uiTheme: 'clock' })}
+              >
+                <Clock3 size={18} />
+                <span>Clock</span>
+              </button>
+            </div>
           </div>
         )}
 
