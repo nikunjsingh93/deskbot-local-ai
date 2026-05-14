@@ -29,7 +29,7 @@ const defaultSettings = {
   ttsEngine: 'browser',
   kokoroVoice: 'af_bella',
   wakeEnabled: false,
-  wakeWord: 'robot',
+  wakeWord: 'buddy',
   uiTheme: 'bot-chat'
 };
 
@@ -99,7 +99,7 @@ function App() {
 
   useEffect(() => {
     if (!settings.wakeWord) {
-      updateSettings({ wakeWord: 'robot' });
+      updateSettings({ wakeWord: 'buddy' });
     }
   }, [settings.wakeWord]);
 
@@ -175,7 +175,7 @@ function App() {
     }, FOLLOWUP_WINDOW_MS);
   }
 
-  const assistantName = String(settings.wakeWord || 'robot').trim() || 'robot';
+  const assistantName = String(settings.wakeWord || 'buddy').trim() || 'buddy';
 
   async function refreshDashboardWeather() {
     setDashboardWeather((prev) => ({ ...prev, status: 'loading', error: '' }));
@@ -487,7 +487,7 @@ function App() {
       if (!transcript) return;
 
       if (settings.wakeEnabled) {
-        const wake = String(settings.wakeWord || 'robot').trim();
+        const wake = String(settings.wakeWord || 'buddy').trim();
         const wakeMatch = findWakeWordMatch(transcript, wake);
         const hasWake = Boolean(wakeMatch);
         const followupActive = Date.now() < followupDeadlineRef.current;
@@ -906,11 +906,11 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
             </label>
             <label>Assistant name / wake word</label>
             <input
-              value={settings.wakeWord || 'robot'}
+              value={settings.wakeWord || 'buddy'}
               onChange={(e) => updateSettings({ wakeWord: e.target.value })}
-              placeholder="robot"
+              placeholder="buddy"
             />
-            <p className="muted small">Wake is off by default. Turn it on, then say the wake word and your question, for example: "robot what is the weather?".</p>
+            <p className="muted small">Wake is off by default. Turn it on, then say the wake word and your question, for example: "buddy what is the weather?".</p>
           </div>
         )}
 
