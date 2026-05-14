@@ -152,6 +152,13 @@ function App() {
     setMessages([]);
     setError('');
     setModelStatus('');
+    if (settings.wakeEnabled) {
+      window.setTimeout(() => {
+        if (!busy && !speaking && !listening) {
+          toggleListening();
+        }
+      }, 50);
+    }
   }
 
   const assistantName = String(settings.wakeWord || 'robot').trim() || 'robot';
