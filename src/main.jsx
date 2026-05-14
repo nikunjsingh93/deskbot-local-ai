@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Bot, Clock3, Mic, MicOff, Send, Settings, Trash2, RefreshCw, Volume2, VolumeX, Database, AlertTriangle, X } from 'lucide-react';
+import { Bot, Clock3, CloudSun, Mic, MicOff, Send, Settings, Trash2, RefreshCw, Volume2, VolumeX, Database, AlertTriangle, X } from 'lucide-react';
 import './styles.css';
 import { runStandaloneChat } from './standaloneLLM.js';
 import { speakWithKokoro, stopKokoroPlayback } from './localTTS.js';
@@ -45,6 +45,7 @@ function App() {
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [now, setNow] = useState(() => new Date());
+  const [dashboardWeather, setDashboardWeather] = useState({ status: 'idle', data: null, error: '' });
   const chatEndRef = useRef(null);
   const recognitionRef = useRef(null);
   const manualStopRef = useRef(false);
@@ -108,6 +109,13 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if ((settings.uiTheme || 'bot-chat') !== 'clock-weather') return;
+    refreshDashboardWeather();
+    const timer = window.setInterval(refreshDashboardWeather, 60 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [settings.uiTheme]);
+
+  useEffect(() => {
     const wasEnabled = wakeEnabledPrevRef.current;
     const isEnabled = Boolean(settings.wakeEnabled);
     wakeEnabledPrevRef.current = isEnabled;
@@ -161,20 +169,41 @@ function App() {
     }, FOLLOWUP_WINDOW_MS);
   }
 
-  function clearChatHistory() {
-    setMessages([]);
-    setError('');
-    setModelStatus('');
-    if (settings.wakeEnabled) {
-      window.setTimeout(() => {
-        if (!busy && !speaking && !listening) {
-          toggleListening();
+  const assistantName = String(settings.wakeWord || 'robot').trim() || 'robot';
+
+  async function refreshDashboardWeather() {
+    setDashboardWeather((prev) => ({ ...prev, status: 'loading', error: '' }));
+    try {
+      const geo = await getBrowserGeo();
+      if (!geo) throw new Error('Location unavailable');
+      const params = new URLSearchParams({
+        latitude: String(geo.latitude),
+        longitude: String(geo.longitude),
+        current: 'temperature_2m,apparent_temperature,weather_code,wind_speed_10m',
+        daily: 'temperature_2m_max,temperature_2m_min',
+        forecast_days: '1',
+        timezone: 'auto'
+      });
+      const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.reason || 'Weather unavailable');
+      setDashboardWeather({
+        status: 'ready',
+        error: '',
+        data: {
+          condition: weatherCodeToText(data.current?.weather_code),
+          temperature: Math.round(Number(data.current?.temperature_2m)),
+          feelsLike: Math.round(Number(data.current?.apparent_temperature)),
+          wind: Math.round(Number(data.current?.wind_speed_10m)),
+          high: Math.round(Number(data.daily?.temperature_2m_max?.[0])),
+          low: Math.round(Number(data.daily?.temperature_2m_min?.[0])),
+          updatedAt: new Date()
         }
-      }, 50);
+      });
+    } catch (err) {
+      setDashboardWeather({ status: 'error', data: null, error: err.message || 'Weather unavailable' });
     }
   }
-
-  const assistantName = String(settings.wakeWord || 'robot').trim() || 'robot';
 
   async function sendMessage(textOverride) {
     const text = (textOverride ?? input).trim();
@@ -537,16 +566,33 @@ function App() {
 
   return (
     <div className="app-shell">
-      <header className="topbar">
-        <div className="brand"><Bot size={22} /> DeskBot</div>
-        <button className="icon-button" onClick={() => setSettingsOpen(true)} title="Settings"><Settings /></button>
-      </header>
+      <button className="floating-settings icon-button" onClick={() => setSettingsOpen(true)} title="Settings"><Settings /></button>
 
       <main className={`main-panel theme-${uiTheme}`}>
-        {uiTheme === 'clock' ? (
+        {uiTheme === 'clock' || uiTheme === 'clock-weather' ? (
           <section className="clock-stage">
             <div className="clock-time">{now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>
             <div className="clock-date">{now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}</div>
+            {uiTheme === 'clock-weather' && (
+              <div className="weather-panel">
+                {dashboardWeather.status === 'ready' && dashboardWeather.data ? (
+                  <>
+                    <div className="weather-main">
+                      <CloudSun size={24} />
+                      <span>{dashboardWeather.data.temperature}°</span>
+                      <strong>{dashboardWeather.data.condition}</strong>
+                    </div>
+                    <div className="weather-details">
+                      Feels {dashboardWeather.data.feelsLike}° · High {dashboardWeather.data.high}° / Low {dashboardWeather.data.low}° · Wind {dashboardWeather.data.wind} km/h
+                    </div>
+                  </>
+                ) : dashboardWeather.status === 'loading' ? (
+                  <div className="weather-main"><CloudSun size={24} /><strong>Loading weather...</strong></div>
+                ) : (
+                  <div className="weather-main"><CloudSun size={24} /><strong>Weather unavailable</strong></div>
+                )}
+              </div>
+            )}
             <div className="robot-status">
               {busy ? 'Thinking...' : listening ? 'Listening...' : 'Ready'}
             </div>
@@ -625,7 +671,6 @@ function App() {
         <SettingsPanel
           settings={settings}
           updateSettings={updateSettings}
-          clearChatHistory={clearChatHistory}
           close={() => setSettingsOpen(false)}
           fetchModels={fetchModels}
           models={models}
@@ -722,6 +767,19 @@ function editDistanceAtMostOne(a, b) {
   return edits <= 1;
 }
 
+function weatherCodeToText(code) {
+  const value = Number(code);
+  if ([0].includes(value)) return 'Clear';
+  if ([1, 2].includes(value)) return 'Partly cloudy';
+  if ([3].includes(value)) return 'Cloudy';
+  if ([45, 48].includes(value)) return 'Fog';
+  if ([51, 53, 55, 56, 57].includes(value)) return 'Drizzle';
+  if ([61, 63, 65, 66, 67, 80, 81, 82].includes(value)) return 'Rain';
+  if ([71, 73, 75, 77, 85, 86].includes(value)) return 'Snow';
+  if ([95, 96, 99].includes(value)) return 'Thunderstorm';
+  return 'Weather';
+}
+
 function getBrowserGeo() {
   return new Promise((resolve) => {
     if (!navigator.geolocation) {
@@ -741,7 +799,7 @@ function getBrowserGeo() {
   });
 }
 
-function SettingsPanel({ settings, updateSettings, clearChatHistory, close, fetchModels, models, allowedModels, modelStatus, memories, refreshMemories, addMemory, deleteMemory, logs, refreshLogs }) {
+function SettingsPanel({ settings, updateSettings, close, fetchModels, models, allowedModels, modelStatus, memories, refreshMemories, addMemory, deleteMemory, logs, refreshLogs }) {
   const [tab, setTab] = useState('model');
   const [newMemory, setNewMemory] = useState('');
 
@@ -802,7 +860,6 @@ function SettingsPanel({ settings, updateSettings, clearChatHistory, close, fetc
 
             <div className="row-buttons">
               <button onClick={fetchModels}><RefreshCw size={16} /> Fetch model list</button>
-              <button className="danger-light" onClick={clearChatHistory}><Trash2 size={16} /> Clear chat history</button>
             </div>
             {modelStatus && <p className="muted">{modelStatus}</p>}
 
@@ -873,6 +930,13 @@ function SettingsPanel({ settings, updateSettings, clearChatHistory, close, fetc
               >
                 <Clock3 size={18} />
                 <span>Clock</span>
+              </button>
+              <button
+                className={`theme-option ${settings.uiTheme === 'clock-weather' ? 'active' : ''}`}
+                onClick={() => updateSettings({ uiTheme: 'clock-weather' })}
+              >
+                <CloudSun size={18} />
+                <span>Clock + Weather</span>
               </button>
             </div>
           </div>
