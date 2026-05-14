@@ -17,6 +17,68 @@ function isFollowupQuestion(text) {
     || /^(yes|no|why|how|what about|and|also|tell me more|go on)\b/.test(normalized);
 }
 
+function splitSpeechText(text, maxChars = 320) {
+  const input = String(text || '').trim();
+  if (!input) return [];
+  const sentences = input.match(/[^.!?]+[.!?]?/g)?.map((part) => part.trim()).filter(Boolean) || [input];
+  const chunks = [];
+  let current = '';
+  for (const sentence of sentences) {
+    const next = current ? `${current} ${sentence}` : sentence;
+    if (next.length <= maxChars) {
+      current = next;
+    } else {
+      if (current) chunks.push(current);
+      current = sentence;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+async function playAudioBlob(blob, onStatus) {
+  const url = URL.createObjectURL(blob);
+  try {
+    const player = new Audio(url);
+    try {
+      await player.play();
+    } catch (err) {
+      if (!isGestureRequiredError(err)) throw err;
+      onStatus('Click or press any key once to enable server voice playback...');
+      await waitForAudioGesture();
+      await player.play();
+    }
+    await new Promise((resolve, reject) => {
+      player.onended = () => resolve();
+      player.onerror = () => reject(new Error('Server audio playback failed.'));
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function isGestureRequiredError(err) {
+  const text = `${err?.name || ''} ${err?.message || err || ''}`.toLowerCase();
+  return text.includes('notallowed') || text.includes('interact') || text.includes('user activation') || text.includes('gesture');
+}
+
+function waitForAudioGesture() {
+  return new Promise((resolve) => {
+    const done = () => {
+      cleanup();
+      resolve();
+    };
+    const cleanup = () => {
+      window.removeEventListener('pointerdown', done);
+      window.removeEventListener('keydown', done);
+      window.removeEventListener('touchstart', done);
+    };
+    window.addEventListener('pointerdown', done, { once: true });
+    window.addEventListener('keydown', done, { once: true });
+    window.addEventListener('touchstart', done, { once: true });
+  });
+}
+
 const defaultSettings = {
   provider: 'ollama',
   ollamaBaseUrl: 'http://192.168.1.213:11434',
@@ -54,6 +116,7 @@ function App() {
   const [dashboardWeather, setDashboardWeather] = useState({ status: 'idle', data: null, error: '' });
   const chatEndRef = useRef(null);
   const messagesRef = useRef(messages);
+  const settingsRef = useRef(settings);
   const recognitionRef = useRef(null);
   const manualStopRef = useRef(false);
   const ignoreRecognitionErrorRef = useRef(false);
@@ -71,6 +134,10 @@ function App() {
       ? settings.openaiModel
       : (settings.standaloneModel || DEFAULT_STANDALONE_MODEL);
   const activeBaseUrl = settings.provider === 'ollama' ? settings.ollamaBaseUrl : settings.openaiBaseUrl;
+
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -101,7 +168,7 @@ function App() {
   }, [settings.standaloneModel]);
 
   useEffect(() => {
-    if (!['browser', 'kokoro'].includes(settings.ttsEngine)) {
+    if (!['browser', 'kokoro', 'server-kokoro'].includes(settings.ttsEngine)) {
       updateSettings({ ttsEngine: 'browser' });
     }
   }, [settings.ttsEngine]);
@@ -179,7 +246,11 @@ function App() {
   }, [settings.wakeEnabled, busy, speaking, listening]);
 
   function updateSettings(patch) {
-    setSettings((prev) => ({ ...prev, ...patch }));
+    setSettings((prev) => {
+      const next = { ...prev, ...patch };
+      settingsRef.current = next;
+      return next;
+    });
   }
 
   function setWakeArmedState(next) {
@@ -245,15 +316,22 @@ function App() {
   }
 
   async function sendMessage(textOverride, options = {}) {
+    const currentSettings = settingsRef.current;
+    const currentActiveModel = currentSettings.provider === 'ollama'
+      ? currentSettings.ollamaModel
+      : currentSettings.provider === 'openai'
+        ? currentSettings.openaiModel
+        : (currentSettings.standaloneModel || DEFAULT_STANDALONE_MODEL);
+    const currentActiveBaseUrl = currentSettings.provider === 'ollama' ? currentSettings.ollamaBaseUrl : currentSettings.openaiBaseUrl;
     const text = (textOverride ?? input).trim();
     if (!text || busy) return;
     setError('');
     setInput('');
     setBusy(true);
     setMood('thinking');
-    if (settings.provider === 'standalone') {
+    if (currentSettings.provider === 'standalone') {
       setModelStatus('Preparing standalone model...');
-    } else if (settings.provider === 'ollama') {
+    } else if (currentSettings.provider === 'ollama') {
       setModelStatus('Loading Ollama model and generating reply...');
     } else {
       setModelStatus('Loading model and generating reply...');
@@ -267,11 +345,11 @@ function App() {
 
     try {
       let data;
-      if (settings.provider === 'standalone') {
+      if (currentSettings.provider === 'standalone') {
         data = await runStandaloneChat({
           messages: nextMessages.slice(-8),
           userText: text,
-          model: settings.standaloneModel,
+          model: currentSettings.standaloneModel,
           onStatus: setModelStatus
         });
       } else {
@@ -280,9 +358,9 @@ function App() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            provider: settings.provider,
-            baseUrl: activeBaseUrl,
-            model: activeModel,
+            provider: currentSettings.provider,
+            baseUrl: currentActiveBaseUrl,
+            model: currentActiveModel,
             userText: text,
             messages: nextMessages.slice(-8),
             clientGeo
@@ -297,7 +375,7 @@ function App() {
       messagesRef.current = completedMessages;
       setMessages(completedMessages);
       setMood(data.savedMemory ? 'happy' : 'idle');
-      if (settings.ttsEnabled && settings.autoSpeak) {
+      if (settingsRef.current.ttsEnabled && settingsRef.current.autoSpeak) {
         await speak(data.reply);
       }
       if (data.savedMemory) refreshMemories();
@@ -312,7 +390,7 @@ function App() {
     } finally {
       setBusy(false);
       window.setTimeout(() => setMood('idle'), 1400);
-      if (settings.wakeEnabled) {
+      if (settingsRef.current.wakeEnabled) {
         openFollowupWindow();
         window.setTimeout(() => {
           if (!listening && !speaking) {
@@ -397,6 +475,7 @@ function App() {
   }
 
   async function speak(text) {
+    const currentSettings = settingsRef.current;
     if (listening) {
       manualStopRef.current = true;
       clearFollowupWindow();
@@ -423,12 +502,12 @@ function App() {
       if (!cleanText) return;
 
       stopKokoroPlayback();
-      if (settings.ttsEngine === 'kokoro') {
+      if (currentSettings.ttsEngine === 'kokoro') {
         try {
           window.speechSynthesis?.cancel();
           await speakWithKokoro(cleanText, {
             onStatus: setModelStatus,
-            voice: settings.kokoroVoice || 'af_bella'
+            voice: currentSettings.kokoroVoice || 'af_bella'
           });
           setModelStatus('');
           return;
@@ -441,6 +520,39 @@ function App() {
         }
       }
 
+      if (currentSettings.ttsEngine === 'server-kokoro') {
+        try {
+          window.speechSynthesis?.cancel();
+          stopKokoroPlayback();
+          const chunks = splitSpeechText(cleanText);
+          for (let i = 0; i < chunks.length; i += 1) {
+            setModelStatus(`Generating server neural voice... ${i + 1}/${chunks.length}`);
+            const response = await fetch(`${API_BASE}/api/tts/kokoro`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                text: chunks[i],
+                voice: currentSettings.kokoroVoice || 'af_bella'
+              })
+            });
+            if (!response.ok) {
+              const data = await response.json().catch(() => ({}));
+              throw new Error(data.error || 'Server Kokoro TTS failed.');
+            }
+            const blob = await response.blob();
+            await playAudioBlob(blob, setModelStatus);
+          }
+          setModelStatus('');
+          return;
+        } catch (err) {
+          const message = err?.message || String(err);
+          setError(`Server Kokoro TTS error: ${message}`);
+          setModelStatus('Server Kokoro TTS failed.');
+          console.error('Server Kokoro TTS failed', err);
+          return;
+        }
+      }
+
       if (!('speechSynthesis' in window)) {
         setError('Browser TTS is not available in this browser.');
         return;
@@ -448,7 +560,7 @@ function App() {
       window.speechSynthesis.cancel();
       const baseRate = 1.0;
       const basePitch = 1.0;
-      const chunks = cleanText.match(/[^.!?]+[.!?]?/g) || [cleanText];
+      const chunks = splitSpeechText(cleanText);
 
       for (const rawChunk of chunks) {
         const chunk = rawChunk.trim();
@@ -931,9 +1043,10 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
             <label>TTS Engine</label>
             <select value={settings.ttsEngine || 'browser'} onChange={(e) => updateSettings({ ttsEngine: e.target.value })}>
               <option value="browser">Browser default voice</option>
-              <option value="kokoro">Kokoro local neural TTS</option>
+              <option value="kokoro">Kokoro browser WebGPU TTS</option>
+              <option value="server-kokoro">Kokoro server TTS</option>
             </select>
-            {settings.ttsEngine === 'kokoro' && (
+            {(settings.ttsEngine === 'kokoro' || settings.ttsEngine === 'server-kokoro') && (
               <>
                 <label>Kokoro Voice</label>
                 <select value={settings.kokoroVoice || 'af_bella'} onChange={(e) => updateSettings({ kokoroVoice: e.target.value })}>
@@ -947,7 +1060,11 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
                   <option value="am_eric">Eric (male)</option>
                   <option value="am_liam">Liam (male)</option>
                 </select>
-                <p className="muted small">First use downloads model files locally and caches them in browser storage. If Kokoro cannot start, DeskBot will show the exact error instead of silently switching voices.</p>
+                <p className="muted small">
+                  {settings.ttsEngine === 'server-kokoro'
+                    ? 'Server Kokoro runs on the DeskBot backend and sends WAV audio to this device. Best for older phones.'
+                    : 'First use downloads model files locally and caches them in browser storage. If Kokoro cannot start, DeskBot will show the exact error instead of silently switching voices.'}
+                </p>
               </>
             )}
             <label className="checkbox-row">

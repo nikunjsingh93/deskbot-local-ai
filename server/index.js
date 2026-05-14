@@ -67,6 +67,9 @@ let llmBusy = false;
 let cooldownUntil = 0;
 let activeRequest = null;
 const CONTINUE_PROMPT = 'Continue exactly where you stopped. Do not repeat prior text. Continue the same sentence naturally.';
+const KOKORO_MODEL_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX';
+let serverKokoro = null;
+let serverKokoroLoadPromise = null;
 
 const app = express();
 app.use(cors({ origin: true }));
@@ -104,6 +107,27 @@ app.delete('/api/memories/:id', (req, res) => {
   deleteMemory.run(id);
   log('INFO', 'Memory deleted', { id });
   res.json({ ok: true });
+});
+
+app.post('/api/tts/kokoro', async (req, res) => {
+  try {
+    const text = sanitizeText(req.body?.text || '', 900).trim();
+    const voice = sanitizeText(req.body?.voice || 'af_bella', 40).trim() || 'af_bella';
+    if (!text) return res.status(400).json({ error: 'TTS text is required.' });
+
+    const tts = await loadServerKokoro();
+    const started = Date.now();
+    const audio = await tts.generate(text, { voice, speed: 1 });
+    const wav = audio.toWav();
+    const buffer = Buffer.from(new Uint8Array(wav));
+    log('INFO', 'Server Kokoro TTS generated audio', { chars: text.length, voice, bytes: buffer.length, ms: Date.now() - started });
+    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(buffer);
+  } catch (err) {
+    log('ERROR', 'Server Kokoro TTS failed', { error: err.message });
+    res.status(500).json({ error: humanizeError(err) });
+  }
 });
 
 app.post('/api/models', async (req, res) => {
@@ -441,6 +465,34 @@ async function callOllamaChat(base, model, messages) {
       totalDurationMs: nsToMs(data.total_duration)
     }
   };
+}
+
+async function loadServerKokoro() {
+  if (serverKokoro) return serverKokoro;
+  if (serverKokoroLoadPromise) return serverKokoroLoadPromise;
+
+  serverKokoroLoadPromise = (async () => {
+    log('INFO', 'Loading server Kokoro TTS model', { model: KOKORO_MODEL_ID, device: 'cpu', dtype: 'q8' });
+    const { KokoroTTS } = await import('kokoro-js');
+    serverKokoro = await KokoroTTS.from_pretrained(KOKORO_MODEL_ID, {
+      device: 'cpu',
+      dtype: 'q8',
+      progress_callback: (progress) => {
+        const status = String(progress?.status || '');
+        if (status) log('DEBUG', 'Server Kokoro load progress', { status, file: progress?.file, progress: progress?.progress });
+      }
+    });
+    log('INFO', 'Server Kokoro TTS model ready');
+    return serverKokoro;
+  })();
+
+  try {
+    return await serverKokoroLoadPromise;
+  } catch (err) {
+    serverKokoro = null;
+    serverKokoroLoadPromise = null;
+    throw err;
+  }
 }
 
 async function callOpenAICompatibleChat(base, model, messages) {
