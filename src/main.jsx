@@ -53,6 +53,7 @@ function App() {
   const [now, setNow] = useState(() => new Date());
   const [dashboardWeather, setDashboardWeather] = useState({ status: 'idle', data: null, error: '' });
   const chatEndRef = useRef(null);
+  const messagesRef = useRef(messages);
   const recognitionRef = useRef(null);
   const manualStopRef = useRef(false);
   const ignoreRecognitionErrorRef = useRef(false);
@@ -72,6 +73,7 @@ function App() {
   const activeBaseUrl = settings.provider === 'ollama' ? settings.ollamaBaseUrl : settings.openaiBaseUrl;
 
   useEffect(() => {
+    messagesRef.current = messages;
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, busy]);
 
@@ -239,8 +241,10 @@ function App() {
       setModelStatus('Loading model and generating reply...');
     }
 
-    const chatContext = options.preserveContext || isFollowupQuestion(text) ? messages : [];
+    const currentMessages = messagesRef.current;
+    const chatContext = options.preserveContext || isFollowupQuestion(text) ? currentMessages : [];
     const nextMessages = [...chatContext, { role: 'user', content: text }];
+    messagesRef.current = nextMessages;
     setMessages(nextMessages);
 
     try {
@@ -271,7 +275,9 @@ function App() {
       }
 
       const assistantMessage = { role: 'assistant', content: data.reply, savedMemory: data.savedMemory, stats: data.stats };
-      setMessages([...nextMessages, assistantMessage]);
+      const completedMessages = [...nextMessages, assistantMessage];
+      messagesRef.current = completedMessages;
+      setMessages(completedMessages);
       setMood(data.savedMemory ? 'happy' : 'idle');
       if (settings.ttsEnabled && settings.autoSpeak) {
         await speak(data.reply);
@@ -280,7 +286,9 @@ function App() {
       setModelStatus('');
     } catch (err) {
       setError(err.message || String(err));
-      setMessages([...nextMessages, { role: 'assistant', content: `I stopped: ${err.message || err}` }]);
+      const failedMessages = [...nextMessages, { role: 'assistant', content: `I stopped: ${err.message || err}` }];
+      messagesRef.current = failedMessages;
+      setMessages(failedMessages);
       setMood('worried');
       setModelStatus('Request failed.');
     } finally {
