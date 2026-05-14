@@ -99,6 +99,11 @@ const defaultSettings = {
   timeFormat: '12h'
 };
 
+const STANDALONE_MODELS = [
+  { name: 'onnx-community/SmolLM2-360M-Instruct-ONNX' },
+  { name: 'onnx-community/SmolLM2-135M-Instruct-ONNX-MHA' }
+];
+
 function App() {
   const [auth, setAuth] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -577,13 +582,12 @@ function App() {
 
   async function fetchModels() {
     if (settings.provider === 'standalone') {
-      const standaloneModels = [
-        { name: 'onnx-community/SmolLM2-360M-Instruct-ONNX' },
-        { name: 'onnx-community/SmolLM2-135M-Instruct-ONNX-MHA' }
-      ];
+      const standaloneModels = filterAllowedModels(STANDALONE_MODELS);
       setModels(standaloneModels);
       setModelStatus('Standalone model list ready. First run downloads and caches model files in your browser.');
       if (!settings.standaloneModel) {
+        if (standaloneModels[0]) updateSettings({ standaloneModel: standaloneModels[0].name });
+      } else if (standaloneModels.length && !standaloneModels.some((m) => m.name === settings.standaloneModel)) {
         updateSettings({ standaloneModel: standaloneModels[0].name });
       }
       return;
@@ -599,11 +603,11 @@ function App() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Failed to fetch models.');
-      setModels(data.models || []);
-      const available = data.models || [];
+      const available = filterAllowedModels(data.models || []);
+      setModels(available);
       setModelStatus(`Found ${available.length} model(s).`);
       if (settings.provider === 'ollama') {
-        const selected = data.models?.find((m) => m.name === settings.ollamaModel);
+        const selected = available.find((m) => m.name === settings.ollamaModel);
         if (!selected && available[0]) {
           updateSettings({ ollamaModel: available[0].name });
           setModelStatus(`Selected model not found, switched to ${available[0].name}.`);
@@ -615,6 +619,13 @@ function App() {
     } catch (err) {
       setModelStatus(err.message || String(err));
     }
+  }
+
+  function filterAllowedModels(modelList) {
+    const allowed = authRef.current?.user?.allowedModels || [];
+    if (!allowed.length) return modelList;
+    const allowedSet = new Set(allowed.map((name) => String(name).toLowerCase()));
+    return modelList.filter((model) => allowedSet.has(String(model.name).toLowerCase()));
   }
 
   async function refreshMemories() {
@@ -689,6 +700,30 @@ function App() {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'Failed to update password.');
       setAdminStatus('Password updated.');
+      await refreshUsers();
+    } catch (err) {
+      setAdminStatus(err.message || String(err));
+    }
+  }
+
+  async function updateUserAllowedModels(id, allowedModels) {
+    setAdminStatus('');
+    try {
+      const response = await apiFetch(`/api/users/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allowedModels })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Failed to update model access.');
+      if (authRef.current?.user?.id === id && data.user) {
+        const nextAuth = { ...authRef.current, user: data.user };
+        authRef.current = nextAuth;
+        setAuth(nextAuth);
+        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(nextAuth));
+        fetchModels();
+      }
+      setAdminStatus('Model access updated.');
       await refreshUsers();
     } catch (err) {
       setAdminStatus(err.message || String(err));
@@ -1188,6 +1223,7 @@ function App() {
           addUser={addUser}
           updateUserName={updateUserName}
           updateUserPassword={updateUserPassword}
+          updateUserAllowedModels={updateUserAllowedModels}
           deleteUser={deleteUser}
           logout={logout}
           isFullscreen={isFullscreen}
@@ -1383,19 +1419,24 @@ function getBrowserGeo() {
   });
 }
 
-function SettingsPanel({ settings, updateSettings, close, fetchModels, models, allowedModels, modelStatus, memories, refreshMemories, addMemory, deleteMemory, logs, refreshLogs, currentUser, users, adminStatus, refreshUsers, addUser, updateUserName, updateUserPassword, deleteUser, logout, isFullscreen, toggleFullscreen }) {
+function SettingsPanel({ settings, updateSettings, close, fetchModels, models, allowedModels, modelStatus, memories, refreshMemories, addMemory, deleteMemory, logs, refreshLogs, currentUser, users, adminStatus, refreshUsers, addUser, updateUserName, updateUserPassword, updateUserAllowedModels, deleteUser, logout, isFullscreen, toggleFullscreen }) {
   const [tab, setTab] = useState('model');
   const [newMemory, setNewMemory] = useState('');
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [usernameDrafts, setUsernameDrafts] = useState({});
   const [passwordDrafts, setPasswordDrafts] = useState({});
+  const [modelDrafts, setModelDrafts] = useState({});
+  const modelChoices = models.length ? models : STANDALONE_MODELS;
 
   return (
     <div className="modal-backdrop">
       <div className="settings-modal">
         <div className="modal-header">
-          <h2>Settings</h2>
+          <div>
+            <h2>Settings</h2>
+            {currentUser?.username && <div className="settings-user">Signed in as {currentUser.username}</div>}
+          </div>
           <div className="modal-actions">
             <button className="icon-button" onClick={toggleFullscreen} title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}>
               {isFullscreen ? <Minimize2 /> : <Maximize2 />}
@@ -1628,6 +1669,48 @@ function SettingsPanel({ settings, updateSettings, close, fetchModels, models, a
                     await updateUserPassword(user.id, passwordDrafts[user.id] || '');
                     setPasswordDrafts((prev) => ({ ...prev, [user.id]: '' }));
                   }}>Update</button>
+                  <div className="admin-model-access">
+                    <label>Allowed models</label>
+                    <textarea
+                      value={modelDrafts[user.id] ?? (user.allowedModels || []).join('\n')}
+                      onChange={(e) => setModelDrafts((prev) => ({ ...prev, [user.id]: e.target.value }))}
+                      placeholder="One model name per line. Leave blank to allow all."
+                    />
+                    <div className="admin-model-checks">
+                      {modelChoices.map((model) => {
+                        const draft = modelDrafts[user.id] ?? (user.allowedModels || []).join('\n');
+                        const selected = parseModelDraft(draft).some((name) => name.toLowerCase() === model.name.toLowerCase());
+                        return (
+                          <label className="checkbox-row" key={model.name}>
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={(e) => {
+                                const next = new Set(parseModelDraft(draft));
+                                if (e.target.checked) next.add(model.name);
+                                else {
+                                  for (const name of [...next]) {
+                                    if (name.toLowerCase() === model.name.toLowerCase()) next.delete(name);
+                                  }
+                                }
+                                setModelDrafts((prev) => ({ ...prev, [user.id]: [...next].join('\n') }));
+                              }}
+                            />
+                            {model.name}
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <div className="row-buttons">
+                      <button onClick={async () => {
+                        await updateUserAllowedModels(user.id, parseModelDraft(modelDrafts[user.id] ?? (user.allowedModels || []).join('\n')));
+                      }}>Save models</button>
+                      <button onClick={async () => {
+                        setModelDrafts((prev) => ({ ...prev, [user.id]: '' }));
+                        await updateUserAllowedModels(user.id, []);
+                      }}>Allow all</button>
+                    </div>
+                  </div>
                   <button
                     className="icon-button"
                     onClick={() => deleteUser(user.id)}
@@ -1681,6 +1764,13 @@ function readUserMessages(userId) {
     // fall through to starter message
   }
   return [{ role: 'assistant', content: 'Hi! I am DeskBot. I can chat and remember things you tell me.' }];
+}
+
+function parseModelDraft(value) {
+  return [...new Set(String(value || '')
+    .split(/\r?\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean))];
 }
 
 function useLocalState(key, initialValue) {

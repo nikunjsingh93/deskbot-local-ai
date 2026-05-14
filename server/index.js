@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_salt TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'user',
   settings_json TEXT NOT NULL DEFAULT '{}',
+  allowed_models_json TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -85,18 +86,20 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
 
 ensureColumn('memories', 'user_id', 'INTEGER');
 ensureColumn('message_log', 'user_id', 'INTEGER');
+ensureColumn('users', 'allowed_models_json', 'TEXT NOT NULL DEFAULT \'[]\'');
 seedDefaultAdmin();
 
 const insertMemory = db.prepare('INSERT INTO memories (user_id, content, source_text, tags) VALUES (?, ?, ?, ?)');
 const getMemories = db.prepare('SELECT id, content, tags, created_at, updated_at FROM memories WHERE user_id = ? ORDER BY id DESC');
 const deleteMemory = db.prepare('DELETE FROM memories WHERE id = ? AND user_id = ?');
 const insertMessageLog = db.prepare('INSERT INTO message_log (user_id, provider, model, user_text, assistant_text) VALUES (?, ?, ?, ?, ?)');
-const getUserByUsername = db.prepare('SELECT id, username, password_hash, password_salt, role, settings_json, created_at FROM users WHERE lower(username) = lower(?)');
-const getUserById = db.prepare('SELECT id, username, role, settings_json, created_at FROM users WHERE id = ?');
-const listUsers = db.prepare('SELECT id, username, role, created_at, updated_at FROM users ORDER BY id ASC');
-const insertUser = db.prepare('INSERT INTO users (username, password_hash, password_salt, role, settings_json) VALUES (?, ?, ?, ?, ?)');
+const getUserByUsername = db.prepare('SELECT id, username, password_hash, password_salt, role, settings_json, allowed_models_json, created_at FROM users WHERE lower(username) = lower(?)');
+const getUserById = db.prepare('SELECT id, username, role, settings_json, allowed_models_json, created_at FROM users WHERE id = ?');
+const listUsers = db.prepare('SELECT id, username, role, allowed_models_json, created_at, updated_at FROM users ORDER BY id ASC');
+const insertUser = db.prepare('INSERT INTO users (username, password_hash, password_salt, role, settings_json, allowed_models_json) VALUES (?, ?, ?, ?, ?, ?)');
 const updateUserUsername = db.prepare('UPDATE users SET username = ?, updated_at = datetime(\'now\') WHERE id = ?');
 const updateUserPassword = db.prepare('UPDATE users SET password_hash = ?, password_salt = ?, updated_at = datetime(\'now\') WHERE id = ?');
+const updateUserAllowedModels = db.prepare('UPDATE users SET allowed_models_json = ?, updated_at = datetime(\'now\') WHERE id = ?');
 const updateUserSettings = db.prepare('UPDATE users SET settings_json = ?, updated_at = datetime(\'now\') WHERE id = ?');
 const deleteUserById = db.prepare('DELETE FROM users WHERE id = ?');
 const insertSession = db.prepare('INSERT INTO auth_sessions (token, user_id, expires_at) VALUES (?, ?, ?)');
@@ -162,7 +165,8 @@ app.post('/api/users', requireAdmin, (req, res) => {
   if (getUserByUsername.get(username)) return res.status(409).json({ error: 'Username already exists.' });
   const hashed = hashPassword(password);
   const settings = JSON.stringify(req.body?.settings && typeof req.body.settings === 'object' ? req.body.settings : {});
-  const info = insertUser.run(username, hashed.hash, hashed.salt, 'user', settings);
+  const allowedModels = JSON.stringify(sanitizeModelList(req.body?.allowedModels));
+  const info = insertUser.run(username, hashed.hash, hashed.salt, 'user', settings, allowedModels);
   log('INFO', 'User created', { userId: info.lastInsertRowid, username });
   res.json({ ok: true, user: publicUser(getUserById.get(info.lastInsertRowid)) });
 });
@@ -174,7 +178,8 @@ app.put('/api/users/:id', requireAdmin, (req, res) => {
   if (!user) return res.status(404).json({ error: 'User not found.' });
   const username = req.body?.username == null ? '' : sanitizeUsername(req.body.username);
   const password = String(req.body?.password || '');
-  if (!username && !password) return res.status(400).json({ error: 'Username or password is required.' });
+  const hasAllowedModels = Object.prototype.hasOwnProperty.call(req.body || {}, 'allowedModels');
+  if (!username && !password && !hasAllowedModels) return res.status(400).json({ error: 'Username, password, or model access is required.' });
   if (username && username.toLowerCase() !== user.username.toLowerCase()) {
     if (getUserByUsername.get(username)) return res.status(409).json({ error: 'Username already exists.' });
     updateUserUsername.run(username, id);
@@ -182,6 +187,9 @@ app.put('/api/users/:id', requireAdmin, (req, res) => {
   if (password) {
     const hashed = hashPassword(password);
     updateUserPassword.run(hashed.hash, hashed.salt, id);
+  }
+  if (hasAllowedModels) {
+    updateUserAllowedModels.run(JSON.stringify(sanitizeModelList(req.body.allowedModels)), id);
   }
   const updated = getUserById.get(id);
   log('INFO', 'User updated', { userId: id, username: updated.username, passwordChanged: Boolean(password) });
@@ -1384,8 +1392,8 @@ function seedDefaultAdmin() {
   let adminId = existing?.id;
   if (!adminId) {
     const hashed = hashPassword(config.defaultAdminPassword || 'admin');
-    const info = db.prepare('INSERT INTO users (username, password_hash, password_salt, role, settings_json) VALUES (?, ?, ?, ?, ?)')
-      .run(username, hashed.hash, hashed.salt, 'admin', '{}');
+    const info = db.prepare('INSERT INTO users (username, password_hash, password_salt, role, settings_json, allowed_models_json) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(username, hashed.hash, hashed.salt, 'admin', '{}', '[]');
     adminId = info.lastInsertRowid;
     log('INFO', 'Default admin user created', { username });
   }
@@ -1399,6 +1407,14 @@ function getUserByUsernameSafe(username) {
 
 function sanitizeUsername(value) {
   return String(value || '').trim().replace(/[^a-zA-Z0-9_.-]/g, '').slice(0, 40);
+}
+
+function sanitizeModelList(value) {
+  const input = Array.isArray(value) ? value : String(value || '').split(/\r?\n|,/);
+  return [...new Set(input
+    .map((item) => sanitizeText(item || '', 160).trim())
+    .filter(Boolean))]
+    .slice(0, 100);
 }
 
 function hashPassword(password) {
@@ -1448,6 +1464,7 @@ function publicUser(user) {
     id: user.id,
     username: user.username,
     role: user.role,
+    allowedModels: parseAllowedModels(user.allowed_models_json),
     created_at: user.created_at
   };
 }
@@ -1458,6 +1475,15 @@ function parseSettings(json) {
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
   } catch {
     return {};
+  }
+}
+
+function parseAllowedModels(json) {
+  try {
+    const parsed = JSON.parse(json || '[]');
+    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string') : [];
+  } catch {
+    return [];
   }
 }
 
