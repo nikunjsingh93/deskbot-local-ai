@@ -141,6 +141,7 @@ function App() {
   const wakeCapturedFollowupRef = useRef(false);
   const requestActiveRef = useRef(false);
   const errorClearTimerRef = useRef(null);
+  const autoFollowupRef = useRef(false);
 
   const activeModel = settings.provider === 'ollama'
     ? settings.ollamaModel
@@ -354,6 +355,27 @@ function App() {
     }, FOLLOWUP_WINDOW_MS);
   }
 
+  function openNonWakeFollowupWindow() {
+    autoFollowupRef.current = true;
+    window.setTimeout(() => {
+      if (!autoFollowupRef.current) return;
+      autoFollowupRef.current = false;
+      if (!busy) setModelStatus('');
+      setClockRobotActive(false);
+      if (listening) {
+        manualStopRef.current = true;
+        ignoreRecognitionErrorRef.current = true;
+        recognitionRef.current?.stop();
+        setListening(false);
+      }
+    }, FOLLOWUP_WINDOW_MS);
+    window.setTimeout(() => {
+      if (autoFollowupRef.current && !busy && !speaking && !listening && !settingsRef.current.wakeEnabled) {
+        toggleListening();
+      }
+    }, 120);
+  }
+
   const assistantName = String(settings.wakeWord || 'buddy').trim() || 'buddy';
 
   function apiFetch(path, options = {}) {
@@ -547,6 +569,8 @@ function App() {
             toggleListening();
           }
         }, 60);
+      } else if (!settingsRef.current.wakeEnabled) {
+        openNonWakeFollowupWindow();
       }
     }
   }
@@ -825,6 +849,7 @@ function App() {
     }
     if (listening) {
       manualStopRef.current = true;
+      autoFollowupRef.current = false;
       if (wakeCaptureTimerRef.current) {
         clearTimeout(wakeCaptureTimerRef.current);
         wakeCaptureTimerRef.current = null;
@@ -874,6 +899,8 @@ function App() {
           setModelStatus(`Wake mode on. Say "${assistantName}" then your question.`);
           setWakeArmedState(false);
         }
+      } else if (autoFollowupRef.current) {
+        setModelStatus('Listening for follow-up...');
       }
     };
     recognition.onresult = (event) => {
@@ -914,15 +941,17 @@ function App() {
 
       setInput(transcript);
       if (transcript) {
+        const preserveContext = autoFollowupRef.current || isFollowupQuestion(transcript);
+        autoFollowupRef.current = false;
         setClockRobotActive(true);
         manualStopRef.current = true;
         recognitionRef.current?.stop();
-        sendMessage(transcript);
+        sendMessage(transcript, { preserveContext });
       }
     };
     recognition.onerror = (event) => {
       const code = String(event?.error || '');
-      if (ignoreRecognitionErrorRef.current || (settings.wakeEnabled && code === 'no-speech')) {
+      if (ignoreRecognitionErrorRef.current || code === 'no-speech') {
         ignoreRecognitionErrorRef.current = false;
         return;
       }
@@ -956,6 +985,10 @@ function App() {
           }
         }, 120);
         return;
+      }
+      if (!settings.wakeEnabled && autoFollowupRef.current) {
+        autoFollowupRef.current = false;
+        setClockRobotActive(false);
       }
       if (!busy) setModelStatus('');
     };
