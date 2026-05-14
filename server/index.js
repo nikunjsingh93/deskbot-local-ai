@@ -219,13 +219,14 @@ app.post('/api/chat', async (req, res) => {
           stats: { mode: 'direct_weather', ok: false, reason: 'missing_location' }
         });
       }
-      const weather = await fetchCurrentWeatherData(geo);
-      const reply = formatWeatherReply(userText, geo, weather);
+      const period = getWeatherPeriod(userText);
+      const weather = await fetchWeatherData(geo);
+      const reply = formatWeatherReply(userText, geo, weather, period);
       return res.json({
         reply,
         savedMemory: null,
         memoriesUsed: [],
-        stats: { mode: 'direct_weather', ok: true }
+        stats: { mode: 'direct_weather', ok: true, period: period.kind }
       });
     } catch (err) {
       log('WARN', 'Direct weather handler failed', { error: err.message });
@@ -823,7 +824,7 @@ async function maybeBuildLiveContext(userText, clientGeo) {
 
 function isWeatherIntent(text) {
   const q = String(text || '').toLowerCase();
-  return /(weather|temperature|forecast|rain|snow|wind|outside|humidity)/.test(q);
+  return /(weather|temperature|forecast|rain|snow|wind|outside|humidity|jacket|coat|umbrella)/.test(q);
 }
 
 function isNearbyPlacesIntent(text) {
@@ -856,21 +857,24 @@ async function resolveGeo(clientGeo) {
 }
 
 async function fetchCurrentWeather(geo) {
-  const data = await fetchCurrentWeatherData(geo);
+  const data = await fetchWeatherData(geo);
   return formatWeatherContext(geo, data);
 }
 
-async function fetchCurrentWeatherData(geo) {
+async function fetchWeatherData(geo) {
   const params = new URLSearchParams({
     latitude: String(geo.latitude),
     longitude: String(geo.longitude),
     current: 'temperature_2m,apparent_temperature,weather_code,wind_speed_10m',
-    daily: 'temperature_2m_max,temperature_2m_min',
+    daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max',
+    forecast_days: '7',
     timezone: 'auto'
   });
   const url = `https://api.open-meteo.com/v1/forecast?${params.toString()}`;
   return fetchJson(url, { timeoutMs: 8000 });
 }
+
+const fetchCurrentWeatherData = fetchWeatherData;
 
 function formatWeatherContext(geo, data) {
   const current = data?.current || {};
@@ -889,11 +893,22 @@ function formatWeatherContext(geo, data) {
   return `Location: ${loc}. Current weather: ${condition}. Temperature ${tempText}, feels like ${feelsText}, wind ${windText}.${hiLo}`;
 }
 
-function formatWeatherReply(userText, geo, data) {
+function getWeatherPeriod(userText) {
+  const q = String(userText || '').toLowerCase();
+  if (/\b(day after tomorrow)\b/.test(q)) return { kind: 'day', dayIndex: 2, label: 'the day after tomorrow' };
+  if (/\b(tomorrow|tmrw|next day)\b/.test(q)) return { kind: 'tomorrow', dayIndex: 1, label: 'tomorrow' };
+  if (/\b(week|weekly|next 7 days|next seven days|7 day|7-day)\b/.test(q)) return { kind: 'week', dayIndex: 0, label: 'the next 7 days' };
+  return { kind: 'current', dayIndex: 0, label: 'right now' };
+}
+
+function formatWeatherReply(userText, geo, data, period = getWeatherPeriod(userText)) {
   const q = String(userText || '').toLowerCase();
   const current = data?.current || {};
   const daily = data?.daily || {};
   const loc = [geo.city, geo.region, geo.country].filter(Boolean).join(', ') || 'your area';
+  if (period.kind === 'week') return formatWeeklyWeatherReply(userText, loc, daily);
+  if (period.kind !== 'current') return formatDailyWeatherReply(userText, loc, daily, period);
+
   const temp = Number(current.temperature_2m);
   const feels = Number(current.apparent_temperature);
   const wind = Number(current.wind_speed_10m);
@@ -917,6 +932,48 @@ function formatWeatherReply(userText, geo, data) {
     return `${summary} ${umbrella ? 'Yes, carry an umbrella.' : 'Umbrella is probably not needed right now.'}`;
   }
   return summary;
+}
+
+function formatDailyWeatherReply(userText, loc, daily, period) {
+  const q = String(userText || '').toLowerCase();
+  const i = period.dayIndex;
+  const date = daily.time?.[i] || period.label;
+  const high = Number(daily.temperature_2m_max?.[i]);
+  const low = Number(daily.temperature_2m_min?.[i]);
+  const code = Number(daily.weather_code?.[i]);
+  const rainChance = Number(daily.precipitation_probability_max?.[i]);
+  const wind = Number(daily.wind_speed_10m_max?.[i]);
+  const condition = weatherCodeToText(code);
+  const highText = Number.isFinite(high) ? `${Math.round(high)}°C` : 'unknown';
+  const lowText = Number.isFinite(low) ? `${Math.round(low)}°C` : 'unknown';
+  const rainText = Number.isFinite(rainChance) ? ` Rain chance ${Math.round(rainChance)}%.` : '';
+  const windText = Number.isFinite(wind) ? ` Max wind ${Math.round(wind)} km/h.` : '';
+  const summary = `Forecast for ${period.label} in ${loc} (${date}): ${condition}. High ${highText} / Low ${lowText}.${rainText}${windText}`;
+
+  if (/(jacket|coat|wear)/.test(q)) {
+    const jacket = shouldWearJacket(high, low, wind, code);
+    return `${summary} ${jacket}`;
+  }
+  if (/(umbrella|rain)/.test(q)) {
+    const umbrella = shouldCarryUmbrella(code) || (Number.isFinite(rainChance) && rainChance >= 40);
+    return `${summary} ${umbrella ? 'Yes, carry an umbrella.' : 'Umbrella is probably not needed.'}`;
+  }
+  return summary;
+}
+
+function formatWeeklyWeatherReply(userText, loc, daily) {
+  const days = Array.isArray(daily.time) ? daily.time.slice(0, 7) : [];
+  if (!days.length) return `I could not read the weekly forecast for ${loc} right now.`;
+  const lines = days.map((day, i) => {
+    const high = Number(daily.temperature_2m_max?.[i]);
+    const low = Number(daily.temperature_2m_min?.[i]);
+    const rainChance = Number(daily.precipitation_probability_max?.[i]);
+    const condition = weatherCodeToText(daily.weather_code?.[i]);
+    const hiLo = Number.isFinite(high) && Number.isFinite(low) ? `${Math.round(high)}°/${Math.round(low)}°C` : 'temp unknown';
+    const rain = Number.isFinite(rainChance) ? `, rain ${Math.round(rainChance)}%` : '';
+    return `${day}: ${condition}, ${hiLo}${rain}`;
+  });
+  return `Here is the forecast for ${loc} for the next 7 days:\n\n${lines.join('\n')}`;
 }
 
 function shouldCarryUmbrella(code) {
