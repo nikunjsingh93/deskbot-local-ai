@@ -154,6 +154,33 @@ app.post('/api/chat', async (req, res) => {
   if (!model) return res.status(400).json({ error: 'Please choose a model first.' });
   if (!userText) return res.status(400).json({ error: 'Message is empty.' });
 
+  if (isTimeIntent(userText)) {
+    return res.json({
+      reply: formatTimeReply(),
+      savedMemory: null,
+      memoriesUsed: [],
+      stats: { mode: 'direct_time', ok: true }
+    });
+  }
+
+  if (isSimpleGreeting(userText)) {
+    return res.json({
+      reply: 'Hello! How can I help?',
+      savedMemory: null,
+      memoriesUsed: [],
+      stats: { mode: 'direct_greeting', ok: true }
+    });
+  }
+
+  if (isSimpleAcknowledgement(userText)) {
+    return res.json({
+      reply: 'Sounds good.',
+      savedMemory: null,
+      memoriesUsed: [],
+      stats: { mode: 'direct_acknowledgement', ok: true }
+    });
+  }
+
   // Direct tool-style weather handling to avoid LLM "no realtime access" refusals.
   if (isWeatherIntent(userText)) {
     try {
@@ -468,7 +495,16 @@ function buildMessages(incomingMessages, userText, memories, savedMemory, liveCo
   const savedNote = savedMemory ? `\nThe user just asked you to remember this, and it has already been saved: ${savedMemory.content}` : '';
   const webNote = liveContext ? `\n\nLive web facts (retrieved just now):\n${liveContext}\nUse these facts when relevant and mention that they are current.` : '';
 
-  const system = `You are DeskBot, a small cute robot pet assistant. Answer the user's latest message only. Be warm, concise, and useful. Do not continue or repeat old assistant messages. Ignore prior topics unless the latest message clearly asks a follow-up. You can remember user preferences when the app tells you memory was saved. Do not claim you created reminders yet. Use the saved memories only when relevant.\n\nRelevant saved memories:\n${memoryText}${savedNote}${webNote}`;
+  const system = `You are DeskBot, a small cute robot pet assistant. Answer the user's latest message only. Be warm, concise, and useful. Do not continue or repeat old assistant messages. Ignore prior topics unless the latest message clearly asks a follow-up. You can remember user preferences when the app tells you memory was saved. Use the saved memories only when relevant.
+
+Hard limits:
+- You do not have calendar, reminder, notification, email, phone, or meeting tools.
+- Never invent meetings, schedules, reminders, tasks, plans, or messages.
+- Never say you will send, schedule, remind, notify, or contact anyone.
+- For greetings or short acknowledgements, reply briefly and do not introduce new topics.
+
+Relevant saved memories:
+${memoryText}${savedNote}${webNote}`;
 
   return [{ role: 'system', content: system }, ...safeHistory];
 }
@@ -477,6 +513,23 @@ function shouldUseConversationHistory(userText) {
   const text = String(userText || '').toLowerCase();
   return /\b(that|this|it|those|they|them|he|she|same|again|another|more|continue|previous|earlier)\b/.test(text)
     || /^(yes|no|why|how|what about|and|also)\b/.test(text.trim());
+}
+
+function isTimeIntent(text) {
+  return /\b(what(?:'s| is) the time|current time|tell me the time|time right now)\b/i.test(text);
+}
+
+function formatTimeReply() {
+  const time = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return `It is ${time}.`;
+}
+
+function isSimpleGreeting(text) {
+  return /^(hi|hello|hey|yo|what'?s up|whats up|good morning|good afternoon|good evening)[!.?\s]*$/i.test(String(text || '').trim());
+}
+
+function isSimpleAcknowledgement(text) {
+  return /^(ok|okay|got it|thanks|thank you|cool|nice|sounds good|alright)[!.?\s]*$/i.test(String(text || '').trim());
 }
 
 function maybeSaveMemory(text) {
@@ -538,6 +591,7 @@ function cleanupReply(reply, incomingMessages, userText) {
   let text = sanitizeText(reply || '', config.maxMessageChars).trim();
   if (!text) return text;
 
+  const userAskedForSchedule = /\b(remind|reminder|schedule|meeting|calendar|task|notify|notification)\b/i.test(userText);
   const priorAssistantText = incomingMessages
     .filter((m) => m?.role === 'assistant')
     .map((m) => String(m.content || ''))
@@ -564,6 +618,8 @@ function cleanupReply(reply, incomingMessages, userText) {
     const overlapsUser = [...userTerms].some((term) => normalized.includes(term));
     const copiedFromPrior = normalized.length > 70 && priorAssistantText.includes(normalized);
     if (copiedFromPrior && !overlapsUser) continue;
+    const inventedSchedule = /\b(remind|reminder|schedule|meeting|calendar|task|notify|notification|comms device|send you)\b/i.test(sentence);
+    if (inventedSchedule && !userAskedForSchedule) continue;
     kept.push(sentence);
   }
 
