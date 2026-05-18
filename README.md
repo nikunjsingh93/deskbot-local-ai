@@ -35,18 +35,6 @@ A local AI robot assistant for chat, voice, memory, weather, and clock displays,
   - `Note that my server IP is 192.168.1.213.`
   - `My favorite model is qwen3:8b.`
 
-## Runtime behavior
-
-- No streaming
-- No Ollama polling during normal chat
-- No `/api/tags` call before every chat
-- One LLM request at a time only
-- Cooldown after failed Ollama requests so the app cannot queue retries
-- Tiny context by default: `num_ctx=1024`
-- Small reply cap: `num_predict=160`
-- Limited chat history sent to model
-- `keep_alive=0` so the model is not kept loaded by this app
-
 ## Install
 
 ```bash
