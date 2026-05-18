@@ -1,0 +1,37 @@
+services:
+  deskbot:
+    build: .
+    container_name: deskbot-local-ai
+    ports:
+      - "5175:5175"
+    environment:
+      PORT: "5175"
+      DATA_DIR: /app/data
+      LOG_DIR: /app/logs
+      DEFAULT_ADMIN_USERNAME: admin
+      DEFAULT_ADMIN_PASSWORD: admin
+      ALLOWED_LLM_HOSTS: "*"
+      OLLAMA_NUM_CTX: "1024"
+      OLLAMA_NUM_PREDICT: "640"
+      OLLAMA_NUM_THREAD: "4"
+      OLLAMA_KEEP_ALIVE: 1m
+      OLLAMA_TEMPERATURE: "0.7"
+      OLLAMA_TOP_K: "40"
+      OLLAMA_TOP_P: "0.9"
+      CHAT_TIMEOUT_MS: "30000"
+      MODEL_FETCH_TIMEOUT_MS: "10000"
+      UNLOAD_TIMEOUT_MS: "8000"
+      OLLAMA_ERROR_COOLDOWN_MS: "30000"
+      MAX_HISTORY_MESSAGES: "4"
+      MAX_MESSAGE_CHARS: "1200"
+      AUTO_EXPLICIT_UNLOAD_AFTER_CHAT: "false"
+    volumes:
+      - deskbot-data:/app/data
+      - deskbot-logs:/app/logs
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  deskbot-data:
+  deskbot-logs:

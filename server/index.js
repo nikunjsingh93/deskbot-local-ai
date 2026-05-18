@@ -839,7 +839,7 @@ function validateBaseUrl(value) {
   if (!['http:', 'https:'].includes(url.protocol)) {
     throw new DeskBotError('Base URL must start with http:// or https://');
   }
-  if (!config.allowedHosts.includes(url.hostname)) {
+  if (!config.allowedHosts.includes('*') && !config.allowedHosts.includes(url.hostname)) {
     throw new DeskBotError(`Host ${url.hostname} is not in ALLOWED_LLM_HOSTS. Add it to .env only if you trust it.`);
   }
   return url.toString().replace(/\/$/, '');

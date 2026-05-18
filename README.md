@@ -44,6 +44,35 @@ npm install
 npm run dev
 ```
 
+## Docker
+
+Build and run:
+
+```bash
+docker compose up --build
+```
+
+Open:
+
+```text
+http://localhost:5175
+```
+
+Data and logs are stored in Docker volumes named `deskbot-data` and `deskbot-logs`.
+
+If Ollama or LM Studio is running on the same machine as Docker, use these base URLs in DeskBot:
+
+```text
+Ollama: http://host.docker.internal:11434
+LM Studio: http://host.docker.internal:1234/v1
+```
+
+Docker Compose is configured with `ALLOWED_LLM_HOSTS=*`, so DeskBot can connect to any Ollama or LM Studio host you enter in Settings. If Ollama is running on another machine on your LAN, use that machine's LAN URL:
+
+```text
+Ollama: http://192.168.1.213:11434
+```
+
 Default login:
 
 ```text
@@ -133,4 +162,4 @@ npm run dev
 
 ## Important
 
-Do not expose Ollama directly to the internet. Use LAN or Tailscale. Keep `ALLOWED_LLM_HOSTS` restrictive.
+Do not expose Ollama directly to the internet. Use LAN or Tailscale. For shared/networked installs, set `ALLOWED_LLM_HOSTS` to only the hosts you trust instead of `*`.
