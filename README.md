@@ -91,6 +91,23 @@ Model: select after fetching model list
 
 Click **Fetch model list** and select any model, including Llama models.
 
+## Connect to LM Studio
+
+In LM Studio:
+
+1. Download and load a chat model.
+2. Start the local server.
+
+In DeskBot Settings:
+
+```text
+Provider: LM Studio / OpenAI-compatible
+Base URL: http://localhost:1234/v1
+Model: select after fetching model list
+```
+
+Click **Fetch model list** and select your loaded LM Studio model.
+
 ## DeskBot logs
 
 ```bash
