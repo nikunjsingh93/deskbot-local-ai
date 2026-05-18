@@ -93,6 +93,11 @@ volumes:
   deskbot-data:
   deskbot-logs:
 ```
+Open:
+
+```text
+http://localhost:5175
+```
 
 Local Docker build:
 
@@ -132,17 +137,9 @@ Notes:
 - If WebGPU is unavailable, DeskBot falls back to CPU/WASM mode automatically.
 - This mode does not require Ollama or LM Studio.
 
-Open:
 
-```text
-http://localhost:5173
-```
 
-Backend:
 
-```text
-http://localhost:5175
-```
 
 ## Connect to Ollama
 
@@ -173,13 +170,7 @@ Model: select after fetching model list
 
 Click **Fetch model list** and select your loaded LM Studio model.
 
-## DeskBot logs
 
-```bash
-npm run logs
-```
-
-Or open Settings → Diagnostics → Refresh backend logs.
 
 ## Important
 
