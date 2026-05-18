@@ -105,14 +105,6 @@ Local Docker build:
 docker compose up --build
 ```
 
-Publish a multi-arch image to Docker Hub:
-
-```bash
-docker buildx build \
-  --platform linux/amd64,linux/arm64,linux/arm/v7 \
-  -t nikunjsingh/deskbot-local-ai:latest \
-  --push .
-```
 
 Default login:
 
