@@ -65,7 +65,6 @@ Open:
 http://localhost:5175
 ```
 
-Data and logs are stored in Docker volumes named `deskbot-data` and `deskbot-logs`.
 
 Docker Compose:
 
