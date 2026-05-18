@@ -46,10 +46,17 @@ npm run dev
 
 ## Docker
 
-Build and run:
+Run from Docker Hub:
 
 ```bash
-docker compose up --build
+docker run -d \
+  --name deskbot-local-ai \
+  -p 5175:5175 \
+  -e ALLOWED_LLM_HOSTS="*" \
+  -v deskbot-data:/app/data \
+  -v deskbot-logs:/app/logs \
+  --restart unless-stopped \
+  nikunjsingh/deskbot-local-ai:latest
 ```
 
 Open:
@@ -60,17 +67,47 @@ http://localhost:5175
 
 Data and logs are stored in Docker volumes named `deskbot-data` and `deskbot-logs`.
 
-If Ollama or LM Studio is running on the same machine as Docker, use these base URLs in DeskBot:
+Docker Compose:
 
-```text
-Ollama: http://host.docker.internal:11434
-LM Studio: http://host.docker.internal:1234/v1
+```yaml
+services:
+  deskbot:
+    image: nikunjsingh/deskbot-local-ai:latest
+    container_name: deskbot-local-ai
+    ports:
+      - "5175:5175"
+    environment:
+      PORT: "5175"
+      DATA_DIR: /app/data
+      LOG_DIR: /app/logs
+      DEFAULT_ADMIN_USERNAME: admin
+      DEFAULT_ADMIN_PASSWORD: admin
+      ALLOWED_LLM_HOSTS: "*"
+    volumes:
+      - deskbot-data:/app/data
+      - deskbot-logs:/app/logs
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  deskbot-data:
+  deskbot-logs:
 ```
 
-Docker Compose is configured with `ALLOWED_LLM_HOSTS=*`, so DeskBot can connect to any Ollama or LM Studio host you enter in Settings. If Ollama is running on another machine on your LAN, use that machine's LAN URL:
+Local Docker build:
 
-```text
-Ollama: http://192.168.1.213:11434
+```bash
+docker compose up --build
+```
+
+Publish a multi-arch image to Docker Hub:
+
+```bash
+docker buildx build \
+  --platform linux/amd64,linux/arm64,linux/arm/v7 \
+  -t nikunjsingh/deskbot-local-ai:latest \
+  --push .
 ```
 
 Default login:
@@ -144,21 +181,6 @@ npm run logs
 ```
 
 Or open Settings → Diagnostics → Refresh backend logs.
-
-## Changing Ollama request limits
-
-Edit `.env`:
-
-```env
-OLLAMA_NUM_CTX=1024
-OLLAMA_NUM_PREDICT=160
-```
-
-Then restart:
-
-```bash
-npm run dev
-```
 
 ## Important
 

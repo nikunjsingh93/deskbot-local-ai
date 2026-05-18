@@ -37,6 +37,12 @@ const config = {
   defaultAdminPassword: process.env.DEFAULT_ADMIN_PASSWORD || 'admin'
 };
 
+const DEFAULT_USER_SETTINGS = {
+  ttsEnabled: true,
+  autoSpeak: true,
+  ttsEngine: 'browser'
+};
+
 fs.mkdirSync(config.dataDir, { recursive: true });
 fs.mkdirSync(config.logDir, { recursive: true });
 const logFile = path.join(config.logDir, 'deskbot.log');
@@ -112,11 +118,6 @@ let cooldownUntil = 0;
 let activeRequest = null;
 const CONTINUE_PROMPT = 'Continue exactly where you stopped. Do not repeat prior text. Continue the same sentence naturally.';
 const KOKORO_MODEL_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX';
-const DEFAULT_USER_SETTINGS = {
-  ttsEnabled: true,
-  autoSpeak: true,
-  ttsEngine: 'browser'
-};
 let serverKokoro = null;
 let serverKokoroLoadPromise = null;
 
