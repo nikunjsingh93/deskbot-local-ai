@@ -112,6 +112,11 @@ let cooldownUntil = 0;
 let activeRequest = null;
 const CONTINUE_PROMPT = 'Continue exactly where you stopped. Do not repeat prior text. Continue the same sentence naturally.';
 const KOKORO_MODEL_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX';
+const DEFAULT_USER_SETTINGS = {
+  ttsEnabled: true,
+  autoSpeak: true,
+  ttsEngine: 'browser'
+};
 let serverKokoro = null;
 let serverKokoroLoadPromise = null;
 
@@ -1398,7 +1403,7 @@ function seedDefaultAdmin() {
   if (!adminId) {
     const hashed = hashPassword(config.defaultAdminPassword || 'admin');
     const info = db.prepare('INSERT INTO users (username, password_hash, password_salt, role, settings_json, allowed_models_json) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(username, hashed.hash, hashed.salt, 'admin', '{}', '[]');
+      .run(username, hashed.hash, hashed.salt, 'admin', JSON.stringify(DEFAULT_USER_SETTINGS), '[]');
     adminId = info.lastInsertRowid;
     log('INFO', 'Default admin user created', { username });
   }
@@ -1477,9 +1482,11 @@ function publicUser(user) {
 function parseSettings(json) {
   try {
     const parsed = JSON.parse(json || '{}');
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? { ...DEFAULT_USER_SETTINGS, ...parsed }
+      : { ...DEFAULT_USER_SETTINGS };
   } catch {
-    return {};
+    return { ...DEFAULT_USER_SETTINGS };
   }
 }
 
